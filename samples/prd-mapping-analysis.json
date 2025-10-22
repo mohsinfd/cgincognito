@@ -1,0 +1,126 @@
+{
+  "mapping_explanation": "How CardGenius V2 Output Maps to PRD Requirements",
+  "prd_version": "v2.3",
+  "cardgenius_version": "v2.0",
+  
+  "input_mapping": {
+    "description": "CardGenius processes raw statement data and outputs structured spending data",
+    "cardgenius_input": {
+      "source": "Gmail PDF statements",
+      "processing": "LLM-based extraction with universal paise detection",
+      "output_format": "Structured JSON with categorized transactions"
+    },
+    "prd_input_requirement": {
+      "description": "PRD expects recommendations from upstream engine",
+      "format": "(user_id, rank, upstream_card_name, optional card_id, savings_by_category, joining_fee, error)"
+    },
+    "mapping_notes": [
+      "CardGenius provides the spending data that feeds into the recommendation engine",
+      "Our categorized transactions become the 'savings_by_category' input",
+      "Our statement processing provides the user spending profile"
+    ]
+  },
+
+  "output_mapping": {
+    "description": "How CardGenius output feeds into PRD-compliant recommendations",
+    "cardgenius_capabilities": {
+      "spending_analysis": "✅ Categorizes transactions into 20+ categories",
+      "amount_parsing": "✅ Universal paise-to-rupee conversion",
+      "bank_detection": "✅ Enhanced detection with subject line patterns",
+      "data_quality": "✅ Bank fees exclusion, validation, error handling"
+    },
+    "prd_requirements": {
+      "catalog_filtering": "❌ Not implemented (requires CashKaro catalog integration)",
+      "report_store_name_mapping": "❌ Not implemented (requires alias resolution)",
+      "milestone_benefits": "❌ Not implemented (requires milestone config)",
+      "deterministic_ranking": "❌ Not implemented (requires recommendation engine)",
+      "top_n_compaction": "❌ Not implemented (requires ranking logic)"
+    },
+    "gap_analysis": {
+      "what_we_have": [
+        "✅ High-quality spending data extraction",
+        "✅ Accurate transaction categorization", 
+        "✅ Universal amount parsing (paise → rupees)",
+        "✅ Enhanced bank statement detection",
+        "✅ Comprehensive error handling"
+      ],
+      "what_prd_needs": [
+        "❌ CashKaro catalog integration",
+        "❌ Alias resolution system",
+        "❌ Milestone benefits lookup",
+        "❌ Recommendation ranking engine",
+        "❌ Top N filtering logic"
+      ]
+    }
+  },
+
+  "integration_requirements": {
+    "description": "What needs to be built to make CardGenius output PRD-compliant",
+    "phase_1": {
+      "title": "Data Pipeline Integration",
+      "tasks": [
+        "Integrate CashKaro catalog (33/34 cards)",
+        "Build alias resolution system",
+        "Implement milestone benefits lookup",
+        "Create deterministic ranking engine"
+      ]
+    },
+    "phase_2": {
+      "title": "Output Formatting",
+      "tasks": [
+        "Map card names to Report Store Names",
+        "Implement Top N filtering",
+        "Add batch metadata generation",
+        "Ensure schema compliance (decimal(18,2))"
+      ]
+    },
+    "phase_3": {
+      "title": "Quality Assurance",
+      "tasks": [
+        "Implement acceptance criteria validation",
+        "Add observability metrics",
+        "Create QA checklist automation",
+        "Test determinism and idempotency"
+      ]
+    }
+  },
+
+  "sample_data_flow": {
+    "step_1": {
+      "title": "CardGenius Processing",
+      "input": "Raw PDF statements from Gmail",
+      "processing": "LLM extraction + categorization",
+      "output": "Structured spending data (see v2-api-response-sample.json)"
+    },
+    "step_2": {
+      "title": "Recommendation Engine",
+      "input": "CardGenius spending data + CashKaro catalog",
+      "processing": "Ranking + filtering + mapping",
+      "output": "PRD-compliant recommendations (see v2-output-sample.json)"
+    },
+    "step_3": {
+      "title": "Frontend Delivery",
+      "input": "PRD-compliant recommendations",
+      "processing": "UI rendering + currency formatting",
+      "output": "User-facing card recommendations"
+    }
+  },
+
+  "validation_checklist": {
+    "cardgenius_ready": [
+      "✅ Amount parsing works universally (not merchant-specific)",
+      "✅ Bank detection enhanced with subject patterns",
+      "✅ Transaction categorization accurate",
+      "✅ Error handling comprehensive",
+      "✅ Schema validation implemented"
+    ],
+    "prd_compliance_pending": [
+      "❌ Catalog-only filtering",
+      "❌ Report Store Name mapping", 
+      "❌ Milestone benefits integration",
+      "❌ Deterministic ranking",
+      "❌ Top N compaction",
+      "❌ Batch metadata generation"
+    ]
+  }
+}

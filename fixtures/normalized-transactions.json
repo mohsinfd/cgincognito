@@ -1,0 +1,21 @@
+[
+  {
+    "txn_id": "h1",
+    "statement_id": "s1",
+    "txn_date": "2023-05-19",
+    "amount": 700,
+    "type": "Dr",
+    "raw_desc": "SWIGGY",
+    "cg_bucket": "dining_or_going_out"
+  },
+  {
+    "txn_id": "h2",
+    "statement_id": "s1",
+    "txn_date": "2023-05-19",
+    "amount": 2124.78,
+    "type": "Dr",
+    "raw_desc": "AMAZON PAYMENTS",
+    "cg_bucket": "amazon_spends"
+  }
+]
+

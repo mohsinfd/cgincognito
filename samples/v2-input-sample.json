@@ -1,0 +1,41 @@
+{
+  "user_id": "user_12345",
+  "as_of_date": "2025-10-22",
+  "spending_data": {
+    "total_spend_monthly": 45000.00,
+    "categories": {
+      "amazon_spends": 12000.00,
+      "flipkart_spends": 8000.00,
+      "grocery_spends_online": 6000.00,
+      "online_food_ordering": 4000.00,
+      "dining_or_going_out": 3000.00,
+      "fuel": 2500.00,
+      "mobile_phone_bills": 1000.00,
+      "other_online_spends": 5000.00,
+      "other_offline_spends": 3500.00
+    },
+    "current_cards": [
+      {
+        "card_id": "hdfc_millennia",
+        "card_name": "HDFC Millennia Credit Card",
+        "bank": "HDFC",
+        "annual_fee": 1000.00,
+        "current_usage": {
+          "amazon_spends": 12000.00,
+          "other_spends": 33000.00
+        }
+      }
+    ]
+  },
+  "statement_period": {
+    "start_date": "2025-09-01",
+    "end_date": "2025-09-30"
+  },
+  "processing_metadata": {
+    "statements_processed": 3,
+    "total_transactions": 45,
+    "processing_time_ms": 2500,
+    "llm_model": "gpt-4o-mini",
+    "schema_version": "v2.3"
+  }
+}

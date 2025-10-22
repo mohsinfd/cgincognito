@@ -1,0 +1,183 @@
+{
+  "success": true,
+  "sessionId": "session_1761109278133_9o9ikd6a2",
+  "processedStatements": 20,
+  "successfulStatements": 18,
+  "failedStatements": 2,
+  "totalTransactions": 245,
+  "totalAmount": 125000.00,
+  "processingTime": 45000,
+  "statements": [
+    {
+      "id": "stmt_001",
+      "bank_code": "hdfc",
+      "card_last4": "1234",
+      "statement_period": "2025-10-01 to 2025-10-31",
+      "processing_result": {
+        "success": true,
+        "parsedData": {
+          "bank": "hdfc",
+          "card_details": {
+            "card_type": "HDFC Bank Regalia Gold Credit Card",
+            "masked_number": "XXXX XXXX XXXX 1234",
+            "credit_limit": 500000,
+            "available_credit": 450000
+          },
+          "owner_details": {
+            "name": "MOHSIN DINGANKAR",
+            "email": "mohsinfd@gmail.com"
+          },
+          "statement_period": {
+            "start_date": "2025-10-01",
+            "end_date": "2025-10-31",
+            "due_date": "2025-11-21"
+          },
+          "summary": {
+            "total_dues": 45000,
+            "minimum_due": 2250,
+            "previous_balance": 0,
+            "payment_received": 0,
+            "purchase_amount": 45000
+          },
+          "transactions": [
+            {
+              "date": "2025-10-01",
+              "description": "AMAZON INDIA",
+              "amount": 1200.00,
+              "type": "Dr",
+              "category": "amazon_spends"
+            },
+            {
+              "date": "2025-10-02",
+              "description": "SWIGGY BANGALORE",
+              "amount": 350.00,
+              "type": "Dr",
+              "category": "online_food_ordering"
+            },
+            {
+              "date": "2025-10-03",
+              "description": "FLIPKART INTERNET PVT LTD",
+              "amount": 2500.00,
+              "type": "Dr",
+              "category": "flipkart_spends"
+            },
+            {
+              "date": "2025-10-04",
+              "description": "BLINKIT GURGAON",
+              "amount": 450.00,
+              "type": "Dr",
+              "category": "grocery_spends_online"
+            },
+            {
+              "date": "2025-10-05",
+              "description": "PAYMENT RECEIVED",
+              "amount": 45000.00,
+              "type": "Cr",
+              "category": "other_offline_spends"
+            }
+          ]
+        },
+        "processingTime": 2500,
+        "llmModel": "gpt-4o-mini",
+        "schemaVersion": "v2.3"
+      }
+    },
+    {
+      "id": "stmt_002",
+      "bank_code": "axis",
+      "card_last4": "8383",
+      "statement_period": "2025-10-01 to 2025-10-31",
+      "processing_result": {
+        "success": true,
+        "parsedData": {
+          "bank": "axis",
+          "card_details": {
+            "card_type": "Axis Bank Magnus Credit Card",
+            "masked_number": "XXXX XXXX XXXX 8383",
+            "credit_limit": 800000,
+            "available_credit": 750000
+          },
+          "owner_details": {
+            "name": "MOHSIN DINGANKAR",
+            "email": "mohsinfd@gmail.com"
+          },
+          "statement_period": {
+            "start_date": "2025-10-01",
+            "end_date": "2025-10-31",
+            "due_date": "2025-11-21"
+          },
+          "summary": {
+            "total_dues": 35000,
+            "minimum_due": 1750,
+            "previous_balance": 0,
+            "payment_received": 0,
+            "purchase_amount": 35000
+          },
+          "transactions": [
+            {
+              "date": "2025-10-01",
+              "description": "FLIPKART INTERNET PVT LTD",
+              "amount": 3181.00,
+              "type": "Dr",
+              "category": "flipkart_spends"
+            },
+            {
+              "date": "2025-10-02",
+              "description": "DREAMPLUG TECHNOLOGIES",
+              "amount": 50347.50,
+              "type": "Dr",
+              "category": "other_online_spends"
+            },
+            {
+              "date": "2025-10-03",
+              "description": "GOOGLE CLOUD CYBS SI",
+              "amount": 2863.06,
+              "type": "Dr",
+              "category": "other_online_spends"
+            },
+            {
+              "date": "2025-10-04",
+              "description": "BBPS PAYMENT RECEIVED",
+              "amount": 57082.00,
+              "type": "Cr",
+              "category": "other_offline_spends"
+            }
+          ]
+        },
+        "processingTime": 2200,
+        "llmModel": "gpt-4o-mini",
+        "schemaVersion": "v2.3"
+      }
+    }
+  ],
+  "errors": [
+    {
+      "statement_id": "stmt_003",
+      "bank_code": "sbi",
+      "error": "Missing required fields: card_last4",
+      "error_code": "MISSING_FIELDS"
+    },
+    {
+      "statement_id": "stmt_004",
+      "bank_code": "hsbc",
+      "error": "PDF decryption failed after 10 attempts",
+      "error_code": "DECRYPTION_FAILED"
+    }
+  ],
+  "summary": {
+    "banks_processed": 7,
+    "banks_successful": 5,
+    "banks_failed": 2,
+    "total_spend_by_category": {
+      "amazon_spends": 1200.00,
+      "flipkart_spends": 5681.00,
+      "grocery_spends_online": 450.00,
+      "online_food_ordering": 350.00,
+      "other_online_spends": 53210.56,
+      "other_offline_spends": 102082.00
+    },
+    "total_debit_amount": 125000.00,
+    "total_credit_amount": 102082.00,
+    "net_spend": 22918.00
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "id": "baa086b71bdb4b559891af8ae40c3391",
+  "processing_eta": {
+    "value": 1000,
+    "unit": "ms"
+  },
+  "status": "COMPLETED",
+  "message": "File Uploaded"
+}
+

@@ -1,0 +1,68 @@
+{
+  "id": "d5bf38b493ce4ccc8060b8fae1d3a401",
+  "status": "COMPLETED",
+  "content": {
+    "card_details": {
+      "bank": "HDFC",
+      "num": "XXXX 06XX XXXX 1271",
+      "card_type": "MoneyBack+",
+      "credit_limit": 90000,
+      "available_credit_limit": 86496,
+      "available_cash_limit": 36000
+    },
+    "owner_details": {
+      "name": "DUMMY SINGH",
+      "email": "dummy@dummy.com"
+    },
+    "summary": {
+      "statement_date": "21052023",
+      "payment_due_date": "10062023",
+      "total_dues": 3504,
+      "min_amount_due": 200,
+      "opening_balance": 0,
+      "payment_amount": 21.04,
+      "purchase_amount": 3524.78,
+      "financial_charges": 0,
+      "cash_advances": 0
+    },
+    "transactions": [
+      {
+        "id": 1,
+        "type": "Dr",
+        "date": "19052023",
+        "amount": 700,
+        "description": "SWIGGY",
+        "category": "",
+        "sub_category": ""
+      },
+      {
+        "id": 2,
+        "type": "Dr",
+        "date": "19052023",
+        "amount": 2124.78,
+        "description": "AMAZON PAYMENTS",
+        "category": "",
+        "sub_category": ""
+      },
+      {
+        "id": 3,
+        "type": "Cr",
+        "date": "19052023",
+        "amount": 21.04,
+        "description": "PAYMENT RECEIVED",
+        "category": "",
+        "sub_category": ""
+      }
+    ],
+    "reward_summary": {
+      "opening_balance": 0,
+      "earned": 0,
+      "redeemed": 0,
+      "expired": 0,
+      "closing_balance": 0,
+      "points_expiring": 0,
+      "expiry_date": ""
+    }
+  }
+}
+

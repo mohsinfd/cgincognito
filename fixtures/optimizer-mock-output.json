@@ -1,0 +1,33 @@
+{
+  "month": "2025-08",
+  "total_missed": 840,
+  "by_category": {
+    "amazon_spends": 520,
+    "dining_or_going_out": 320
+  },
+  "top_changes": [
+    {
+      "rule": "Use SBI Cashback on Amazon",
+      "est_monthly_gain": 520
+    },
+    {
+      "rule": "Use HDFC Swiggy Card for food",
+      "est_monthly_gain": 320
+    }
+  ],
+  "findings": [
+    {
+      "txn_id": "h1",
+      "best_card": "HDFC Swiggy Card",
+      "delta_value": 320,
+      "explanation": ["CASHBACK_CARD_MISUSE"]
+    },
+    {
+      "txn_id": "h2",
+      "best_card": "SBI Cashback Card",
+      "delta_value": 520,
+      "explanation": ["WRONG_CHANNEL"]
+    }
+  ]
+}
+

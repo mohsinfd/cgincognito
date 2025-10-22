@@ -1,0 +1,130 @@
+# CardGenius Project Rules
+
+## Architecture Principles
+- **Security First**: No secrets in frontend; OAuth least-privilege; encryption at rest; masked PAN
+- **No-Code Friendly**: Design APIs that can be consumed by Make/Zapier/Retool
+- **Mobile First**: All UI components must be responsive and mobile-optimized
+- **Privacy by Design**: Hard delete capability; 180-day retention default; consent tracking
+
+## Code Standards
+
+### TypeScript
+- Strict mode enabled
+- Explicit types for all function parameters and returns
+- Use discriminated unions for state machines (e.g., status enums)
+- Prefer `type` over `interface` for data shapes
+
+### API Design
+- REST conventions: POST for mutations, GET for reads
+- Always include error codes and messages
+- Support polling with backoff (2s → 3s → 5s, max 90s)
+- Return ETA metadata when async processing
+
+### Security
+- Never log PII (card numbers, email content, tokens)
+- Mask card numbers to last 2-4 digits only
+- Store OAuth tokens encrypted (enctext type)
+- Rate limit: 429 with retry-after header
+- Validate all user inputs against JSON schemas
+
+### Database
+- Use UUIDs for primary keys
+- Always include timestamps (created_at, updated_at)
+- Use JSONB for flexible nested data (buckets, payloads)
+- Foreign keys with appropriate constraints
+- Use enums/check constraints for status fields
+
+### Error Handling
+- Distinguish client errors (400) from server errors (500)
+- Return actionable error messages
+- Include error codes for programmatic handling
+- Log stack traces server-side only
+
+### External APIs
+- Wrap all external calls in try-catch
+- Implement retry logic (exponential backoff)
+- Cache responses when appropriate (spend vectors: 5-15min)
+- Never expose API keys in frontend
+
+## Feature-Specific Rules
+
+### BoostScore Integration
+- Inject x-api-key and x-api-secret server-side only
+- Support multipart/form-data for file uploads
+- Handle password-protected PDFs (try DOB/last2/last4 heuristics)
+- Max file size: 10MB
+- Poll with increasing intervals for async results
+
+### Gmail Integration
+- Scopes: gmail.readonly (required), gmail.modify (optional)
+- Query registry for top 12 Indian issuers
+- Poll every 15 minutes per connected user
+- Apply label "CardGenius/Statement" when modify scope granted
+- Handle pagination for large result sets
+
+### Category Mapping
+- Apply deterministic regex rules first
+- Fall back to LLM only when regex misses and vendor_cat is blank
+- Confidence threshold: 0.7 for LLM classifications
+- Default to other_offline_spends when uncertain
+- Log misclassifications for dictionary expansion
+
+### Optimizer
+- Build monthly spend vector from normalized transactions
+- Handle credits (reduce category totals)
+- Call CG Calculator API with spend vector
+- Compute delta_value = rewards(best) - rewards(actual)
+- Tag explanations (WRONG_CHANNEL, CAP_EXCEEDED, etc.)
+
+## Testing Requirements
+- Unit tests for mapping functions
+- Integration tests for proxy endpoints
+- Acceptance tests from PRD Section M must pass
+- Mock external APIs in tests
+- Test error paths (wrong password, invalid files, etc.)
+
+## Deployment
+- Use environment variables for all config
+- Never commit secrets to repo
+- Include .env.example with all required vars
+- Support both UAT and PROD environments
+- Feature flags for new capabilities
+
+## Analytics
+- Track all events from PRD Section P
+- Include user_id, bank_code, timestamps
+- Measure parse latency, missed savings, conversion
+- No PII in analytics payloads
+
+## File Organization
+```
+/
+├── src/
+│   ├── types/          # TypeScript definitions
+│   ├── proxy/          # Edge function/worker
+│   ├── lib/
+│   │   ├── boostscore/ # BoostScore client
+│   │   ├── gmail/      # Gmail connector
+│   │   ├── mapper/     # Category mapping
+│   │   └── optimizer/  # Optimizer algorithm
+│   ├── db/             # Database schemas & migrations
+│   ├── components/     # React components
+│   └── utils/          # Helpers
+├── fixtures/           # Mock data for testing
+├── docs/               # Documentation
+└── scripts/            # Operational scripts
+```
+
+## Copy Standards
+- Use microcopy from PRD Section U
+- Privacy-focused language
+- Clear error messages with next steps
+- Indian English conventions (₹, crore/lakh where appropriate)
+
+## Performance
+- P95 parse latency: < 30s
+- Frontend time to first recs: < 30s P95
+- Cache spend vector API calls (5-15min TTL)
+- Optimize SQL queries with appropriate indexes
+- Use streaming for large file uploads
+

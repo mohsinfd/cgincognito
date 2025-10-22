@@ -1,0 +1,752 @@
+# CardGenius – Gmail Statement Sync + Upload + Spend Optimizer (No‑Code Build Spec)
+
+This is a **drop‑in build document** optimized for no‑/low‑code tools (ChatGPT Canvas, Cursor, Make/Zapier, Retool) and a tiny proxy. It includes **schemas, flows, prompts, endpoints, fixtures, and acceptance tests** so PM/Design/FE can ship v1 fast and harden later.
+
+---
+
+## A. Outcomes & Guardrails
+
+**Primary outcomes**
+
+* Zero‑friction spend ingestion via **Gmail sync** + **PDF upload**.
+* Normalized **CG spend buckets** from statements.
+* **Optimizer** that quantifies missed rewards and produces simple routing rules.
+
+**KPIs (60 days)**
+
+* ≥60% of new CG users connect Gmail; ≥85% parse success across top 12 issuers.
+* ≤30s P95 from upload → first recs; ≥15% uplift in card‑lead conversion.
+
+**Non‑negotiables**
+
+* Least‑privilege OAuth; secrets never in browser; hard delete on user request; masked PAN (last2–4 only); encryption at rest.
+
+---
+
+## B. Architecture (No‑/Low‑Code First)
+
+### B1. Components
+
+* **Frontend**: Any (ChatGPT Canvas prototype / Retool / Next.js). Uses our proxy APIs only.
+* **Tiny Proxy** *(must‑have)*: Cloudflare Worker / Vercel Edge / FastAPI to inject BoostScore and Gmail secrets; stream files; implement polling.
+* **Storage**: Supabase/Postgres (or Retool DB). Minimal schemas below.
+* **Schedulers**: Make/Zapier cron (15 min) or Cloudflare Scheduled Triggers.
+
+### B2. Minimal Proxy Endpoints
+
+* `POST /cg/stmt/upload` → forwards multipart to BoostScore `POST /bank-service/v1/statements` (inject `x-api-key/secret`).
+* `GET /cg/stmt/:id` → BoostScore `GET /bank-service/v1/statements/:id/content`.
+* `POST /cg/gmail/ingest` → server job to fetch Gmail messages (poll mode), extract attachments, call `/cg/stmt/upload`, then normalize & store.
+* `POST /cg/optimize` → given txns + user card set → compute missed‑savings via CG Calculator API.
+
+> Reason: No‑code tools can hit these 3–4 endpoints without owning secrets. All heavy lifting stays server‑side.
+
+---
+
+## C. Environment Variables (one file)
+
+```
+# BoostScore
+BOOST_BASE_URL=https://trial-cc.boostscore.in
+BOOST_API_KEY=...
+BOOST_API_SECRET=...
+
+# Gmail OAuth (Google Cloud project)
+GOOGLE_CLIENT_ID=...
+GOOGLE_CLIENT_SECRET=...
+GOOGLE_REDIRECT_URI=https://<proxy>/oauth2/callback
+OAUTH_JWT_SIGNING_KEY=...
+
+# App
+DB_URL=postgres://...
+ENCRYPTION_KMS_KEY=...
+WEB_ORIGIN=https://<frontend>
+MAX_UPLOAD_MB=10
+```
+
+---
+
+## D. Data Schemas (TypeScript + JSON Schema)
+
+### D1. Transaction (normalized)
+
+```ts
+export type Txn = {
+  txn_id: string;            // stable hash
+  statement_id: string;      // vendor or internal
+  txn_date: string;          // YYYY-MM-DD
+  amount: number;            // INR+
+  type: 'Dr'|'Cr';
+  raw_desc: string;
+  merchant_norm?: string;    // normalized merchant name
+  vendor_cat?: string;       // as provided by vendor
+  cg_bucket: CgBucket;       // mapped bucket
+  card_last4?: string;       // masked
+  source_currency?: string;
+  source_amount?: number;
+};
+
+export type CgBucket =
+ | 'amazon_spends' | 'flipkart_spends' | 'grocery_spends_online'
+ | 'other_online_spends' | 'other_offline_spends' | 'dining_or_going_out'
+ | 'fuel' | 'travel' | 'utilities' | 'school_fees' | 'rent';
+```
+
+### D2. Spend Snapshot (monthly)
+
+```ts
+export type SpendSnapshot = {
+  user_id: string;
+  month: string; // YYYY-MM
+  source: 'statement'|'gmail_statement';
+  buckets: Record<CgBucket, number>;
+};
+```
+
+### D3. Optimizer Input/Output
+
+```ts
+export type OptimizerInput = {
+  user_id: string;
+  month: string;
+  txns: Txn[];         // same month
+  user_cards: string[]; // card keys or issuer+product identifiers
+};
+
+export type OptimizerFinding = {
+  txn_id: string;
+  actual_card?: string;           // infer from last4 if known
+  best_card: string;              // from CG Calculator API
+  delta_value: number;            // ₹ gain vs actual
+  explanation: ExplanationTag[];  // reasons
+};
+
+export type ExplanationTag =
+  | 'WRONG_CHANNEL' | 'CAP_EXCEEDED' | 'MERCHANT_EXCLUSION'
+  | 'FX_FEE' | 'BILLPAY_BONUS' | 'CASHBACK_CARD_MISUSE';
+
+export type OptimizerResult = {
+  month: string;
+  total_missed: number;
+  by_category: Record<CgBucket, number>;
+  top_changes: Array<{rule: string; est_monthly_gain: number}>;
+  findings: OptimizerFinding[];
+};
+```
+
+### D4. JSON Schema (validator‑friendly)
+
+```json
+{
+  "$id": "https://cardgenius/schemas/txn.json",
+  "type": "object",
+  "required": ["txn_id","statement_id","txn_date","amount","type","raw_desc","cg_bucket"],
+  "properties": {
+    "txn_id": {"type":"string"},
+    "statement_id": {"type":"string"},
+    "txn_date": {"type":"string","pattern":"^\\d{4}-\\d{2}-\\d{2}$"},
+    "amount": {"type":"number","minimum":0},
+    "type": {"enum":["Dr","Cr"]},
+    "raw_desc": {"type":"string"},
+    "merchant_norm": {"type":"string"},
+    "vendor_cat": {"type":"string"},
+    "cg_bucket": {"enum":["amazon_spends","flipkart_spends","grocery_spends_online","other_online_spends","other_offline_spends","dining_or_going_out","fuel","travel","utilities","school_fees","rent"]},
+    "card_last4": {"type":"string","pattern":"^\\d{2,4}$"}
+  }
+}
+```
+
+---
+
+## E. External Contracts (BoostScore) – Wrapped for No‑Code
+
+### E1. Upload (proxy)
+
+**Frontend → Proxy** `POST /cg/stmt/upload`
+
+* `multipart/form-data`: `file`, `payload` JSON string
+* Payload fields: `{ name, dob (DDMMYYYY), bank (code), card_no (min last2), pass_str? }`
+* Proxy sets headers: `x-api-key`, `x-api-secret` and forwards to BoostScore.
+* Response: `{ id, processing_eta:{value,unit:'ms'}, status }`
+
+**Errors to surface**
+
+* 400 invalid payload (DOB/empty) → inline errors
+* 500 decryption failed → ask `pass_str`
+* 413 size > 10MB → help text
+* 429 / 504 → retry/backoff UX
+
+### E2. Retrieve Content (proxy)
+
+`GET /cg/stmt/:id` → returns BoostScore `{ id, status, content? }`
+
+* `status=PENDING` → keep polling (2→3→5s; cap 90s)
+* On `COMPLETED` normalize `content.*` (see mapping)
+
+### E3. Bank Codes (static)
+
+Embed provided codes (Axis/HDFC/ICICI…); **validate bank is in list** before POST.
+
+---
+
+## F. Gmail Connector (No‑Code Friendly)
+
+### F1. Scopes
+
+* `https://www.googleapis.com/auth/gmail.readonly` (required)
+* `.../gmail.modify` (optional: apply label `CardGenius/Statement`)
+* `openid email` for identity
+
+### F2. Query Registry (initial India set)
+
+```
+HDFC:  from:(alerts@hdfcbank.net OR noreply@hdfcbank.com) subject:(Credit Card e-Statement) has:attachment
+SBI:   from:(donotreply@sbicard.com) (statement OR e-Statement) has:attachment
+ICICI: from:(icici@notification.icicibank.com OR noreply@icicibank.com) (Credit Card Statement) has:attachment
+Axis:  from:(alerts@axisbank.com) (Card e-Statement) has:attachment
+Kotak: from:(kotakcreditcard@kotak.com) (Statement) has:attachment
+HSBC:  from:(no.reply@hsbc.co.in) (Credit Card e-Statement) has:attachment
+SC:    from:(e-Statements.India@sc.com) has:attachment
+CITI:  from:(statements.india@citibank.com) has:attachment
+Generic fallback: subject:(Statement) has:attachment filename:(pdf OR zip)
+```
+
+### F3. Ingestion Modes
+
+* **Polling** (simpler for no‑code): every 15 mins per connected user → run queries → fetch message IDs newer than last checkpoint → download attachments → forward PDFs to `/cg/stmt/upload`.
+* **History API Watch** (advanced): Pub/Sub; use later when dev bandwidth allows.
+
+### F4. Attachments
+
+* Preferred: PDF; ZIP (unzip; parse PDFs); HTML (v1.1 templates).
+* Passworded PDFs: heuristics → try DOB/last2/last4; else prompt once and cache per bank.
+
+---
+
+## G. Category Mapping – Deterministic Rules + LLM Assist
+
+### G1. Deterministic Regex Dictionary (seed)
+
+```yaml
+rules:
+  dining_or_going_out:
+    - '(?i)swiggy|zomato|restaurant|dining|eats|ubereats'
+  grocery_spends_online:
+    - '(?i)blinkit|instamart|bigbasket|zepto'
+  fuel:
+    - '(?i)hpcl|iocl|bpcl|petrol|fuel|hindustan petroleum|indian oil|bharat petroleum'
+  amazon_spends:
+    - '(?i)amazon(?! pay.*bill)'
+  flipkart_spends:
+    - '(?i)flipkart'
+  travel:
+    - '(?i)indigo|vistara|airasia|spicejet|ixigo|irctc|makemytrip|ola|uber|uber rides'
+  utilities:
+    - '(?i)electricity|water bill|gas bill|broadband|jio|airtel|vi|postpaid|prepaid|billpay'
+  school_fees:
+    - '(?i)school fee|tuition|college fee|education'
+  rent:
+    - '(?i)rent|nobroker|housing rent|mygate rent'
+```
+
+### G2. LLM Prompt (fallback when `vendor.category` is blank and regex misses)
+
+```
+System: You map Indian card transactions to CardGenius buckets.
+Buckets: [amazon_spends, flipkart_spends, grocery_spends_online, other_online_spends,
+other_offline_spends, dining_or_going_out, fuel, travel, utilities, school_fees, rent]
+If confident ≥0.7 output bucket; else other_offline_spends.
+
+User:
+Description: "SWIGGY INSTAMART 080-12345 BLR"
+Amount: 524.00
+Online/Offline hint: online
+```
+
+**Expected**: `grocery_spends_online`
+
+> In Canvas, this prompt can be embedded to classify lines locally without external calls if using gpt‑json mode.
+
+---
+
+## H. Optimizer – Algorithm & Calculator Hook
+
+### H1. Steps (per month)
+
+1. Build monthly spend vector from normalized txns (credits reduce category totals).
+2. For each **transaction**, create a delta vector = base month + txn.
+3. Call **CG Calculator API** with vector → ranked cards.
+4. Infer **actual_card** (from statement/card_last4 if available; else unknown).
+5. Compute `delta_value = rewards(best) – rewards(actual or 0)`.
+6. Tag explanations (rule set below).
+7. Aggregate by category & merchant → produce top routing changes.
+
+### H2. Explanation Rules
+
+* `WRONG_CHANNEL`: vendor_cat/regex says POS but card is online‑bonus (or vice versa).
+* `CAP_EXCEEDED`: actual card monthly cap met (track caps in a reference table).
+* `MERCHANT_EXCLUSION`: brand excluded on actual (e.g., wallet loads).
+* `BILLPAY_BONUS`: would’ve earned bonus via partner billpay route.
+* `CASHBACK_CARD_MISUSE`: used miles card for pure e‑com where cashback card dominates.
+
+### H3. Optimizer Output Example
+
+```json
+{
+  "month": "2025-08",
+  "total_missed": 1240,
+  "by_category": {"fuel": 220, "grocery_spends_online": 420, "dining_or_going_out": 300, "other_online_spends": 300},
+  "top_changes": [
+    {"rule": "Use SBI Cashback for Amazon; avoid HDFC Millennia after cap", "est_monthly_gain": 520},
+    {"rule": "Move Blinkit/Instamart to AU LIT Online bucket", "est_monthly_gain": 420}
+  ]
+}
+```
+
+---
+
+## I. UI/UX – Screens & States (Mobile‑first)
+
+### I1. Entry & Consent
+
+* Card: **Connect Gmail** → scope list → privacy microcopy.
+* Alternative: **Upload Statement (PDF)**.
+
+### I2. Upload Form
+
+* Fields: Bank (select with codes) · Name · DOB (DDMMYYYY) · Card last2–4 · Password? · File.
+* Help: “≤10MB PDF; if your bank zips, upload ZIP.”
+
+### I3. Processing
+
+* Skeleton list + timer: “Parsing ~{eta}s”.
+* Poll with backoff. Cancel → Manual Entry.
+
+### I4. Results (same for Gmail & Upload)
+
+* **Top 3 cards** then full list; “Show math” drawer → monthly vector.
+* **Edit categories** inline (toggle merchants on/off → rerun CG).
+* **Optimizer**: missed savings tile + top fixes; “Routing Guide” sheet.
+
+### I5. Error States
+
+* Decryption failed → ask for password.
+* Size too big → compress or pick another month.
+* No statements found → suggest upload.
+
+### I6. Settings
+
+* Disconnect Gmail; Delete data; Manage labels; Data retention (180d default).
+
+**Copy blocks (ready to paste)**
+
+* Consent: “We only scan credit‑card statements from your inbox. We don’t read other emails. You can disconnect anytime.”
+* Privacy: “Card numbers are masked. You can delete all data in one tap.”
+
+---
+
+## J. Storage (SQL ready)
+
+```sql
+create table gmail_accounts (
+  user_id uuid primary key,
+  google_sub text not null,
+  email text not null,
+  access_token enctext not null,
+  refresh_token enctext not null,
+  history_id text,
+  scopes text[],
+  connected_at timestamptz default now()
+);
+
+create table statements (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null,
+  vendor_stmt_id text unique,
+  bank_code text not null,
+  card_last4 text,
+  period_start date,
+  period_end date,
+  status text not null,
+  source text not null check (source in ('upload','gmail_statement')),
+  created_at timestamptz default now()
+);
+
+create table transactions (
+  txn_id text primary key,
+  statement_id uuid references statements(id),
+  txn_date date not null,
+  amount numeric not null,
+  type text check (type in ('Dr','Cr')),
+  raw_desc text not null,
+  merchant_norm text,
+  vendor_cat text,
+  cg_bucket text not null,
+  card_last4 text
+);
+
+create table spend_snapshot_monthly (
+  user_id uuid,
+  month char(7),
+  source text,
+  buckets jsonb,
+  primary key (user_id, month, source)
+);
+
+create table optimizer_results (
+  user_id uuid,
+  month char(7),
+  total_missed numeric,
+  payload jsonb,
+  created_at timestamptz default now(),
+  primary key (user_id, month)
+);
+```
+
+---
+
+## K. No‑/Low‑Code Recipes
+
+### K1. ChatGPT Canvas (prototype without secrets)
+
+* Use **mock endpoints** (see Fixtures) to simulate BoostScore & Gmail.
+* Embed **LLM bucket classifier** with the prompt in §G2.
+* Validate UX; export HTML/React once stable.
+
+### K2. Make.com (production‑lite)
+
+* Trigger: Scheduler → Gmail Search (queries in §F2, since last run).
+* For each message: Get attachment → HTTP **POST** to `/cg/stmt/upload` (our proxy).
+* Wait/Retry: HTTP **GET** `/cg/stmt/:id` until `COMPLETED`.
+* Webhook: **POST** `/cg/optimize` with normalized txns.
+* Write rows to Supabase via native connector.
+
+### K3. Retool (Ops backoffice)
+
+* Table views for `statements`, `transactions`, snapshots.
+* Admin tooling: re‑map bucket, delete data, view logs.
+
+---
+
+## L. Fixtures (pasteable for mocks & tests)
+
+### L1. BoostScore Upload (success)
+
+```json
+{"id":"baa086b71bdb4b559891af8ae40c3391","processing_eta":{"value":1000,"unit":"ms"},"status":"COMPLETED","message":"File Uploaded"}
+```
+
+### L2. BoostScore Content (completed)
+
+```json
+{
+  "id":"d5bf38b493ce4ccc8060b8fae1d3a401",
+  "status":"COMPLETED",
+  "content":{
+    "card_details":{"bank":"HDFC","num":"XXXX 06XX XXXX 1271","card_type":"MoneyBack+","credit_limit":90000,"available_credit_limit":86496,"available_cash_limit":36000},
+    "owner_details":{"name":"DUMMY SINGH","email":"dummy@dummy.com"},
+    "summary":{"statement_date":"21052023","payment_due_date":"10062023","total_dues":3504,"min_amount_due":200,"opening_balance":0,"payment_amount":21.04,"purchase_amount":3524.78,"financial_charges":0,"cash_advances":0},
+    "transactions":[
+      {"id":1,"type":"Dr","date":"19052023","amount":700,"description":"SWIGGY","category":"","sub_category":""},
+      {"id":2,"type":"Dr","date":"19052023","amount":2124.78,"description":"AMAZON PAYMENTS","category":"","sub_category":""},
+      {"id":3,"type":"Cr","date":"19052023","amount":21.04,"description":"PAYMENT RECEIVED"}
+    ],
+    "reward_summary":{"opening_balance":0,"earned":0,"redeemed":0,"expired":0,"closing_balance":0,"points_expiring":0,"expiry_date":""}
+  }
+}
+```
+
+### L3. Normalized Txns (expected after mapping)
+
+```json
+[
+  {"txn_id":"h1","statement_id":"s1","txn_date":"2023-05-19","amount":700,"type":"Dr","raw_desc":"SWIGGY","cg_bucket":"dining_or_going_out"},
+  {"txn_id":"h2","statement_id":"s1","txn_date":"2023-05-19","amount":2124.78,"type":"Dr","raw_desc":"AMAZON PAYMENTS","cg_bucket":"amazon_spends"}
+]
+```
+
+### L4. Optimizer Mock Output
+
+```json
+{"month":"2025-08","total_missed":840,"by_category":{"amazon_spends":520,"dining_or_going_out":320},"top_changes":[{"rule":"Use SBI Cashback on Amazon","est_monthly_gain":520},{"rule":"Use HDFC Swiggy Card for food","est_monthly_gain":320}]}
+```
+
+---
+
+## M. Acceptance Tests (must pass)
+
+1. **Upload**: non‑password + passworded PDFs (HDFC/SBI/ICICI) → parse success; error surfaces when wrong pass.
+2. **Gmail**: connect; backfill 12m; find ≥1 attachment for known banks; dedupe; label applied (if granted).
+3. **Mapping**: regex dictionary tags Swiggy→Dining; Blinkit→Grocery Online; IOCL→Fuel; Amazon→Amazon bucket.
+4. **Snapshot**: month aggregation equals sum(txn amounts – credits) by bucket.
+5. **Optimizer**: produces non‑zero `total_missed` when best_card differs; explanations assigned.
+6. **Privacy**: delete all → rows removed from all tables; Gmail token revoked.
+
+---
+
+## N. Rollout Plan
+
+* **Week 1**: Proxy + Upload flow + Mapping + Snapshots + Canvas prototype.
+* **Week 2**: Gmail polling + normalizer + basic Optimizer → top fixes.
+* **Week 3**: UX polish, analytics, settings (delete/disconnect), QA top 10 banks.
+* **Week 4**: Caps & exclusions table, better explanations, HTML statement parser (top 1–2 issuers).
+
+Owners: PM (AB) · FE (Bhavik) · BE (FS#2) · Design (Angad) · QA (borrowed)
+
+---
+
+## O. Feature Flags
+
+* `gmail_sync_enabled`
+* `optimizer_enabled`
+* `html_statement_parser`
+* `apply_gmail_label`
+
+---
+
+## P. Analytics (event names)
+
+* `gmail_connect_started/success/failed`
+* `gmail_backfill_started/completed`
+* `statement_upload_started/completed/failed_{code}`
+* `statement_parsed`
+* `spend_snapshot_created`
+* `optimizer_run_completed`
+* `cg_reco_viewed` / `lead_generated`
+
+Props: `user_id`, `bank_code`, `parse_latency_ms`, `month`, `missed_value_total`
+
+---
+
+## Q. Security & Compliance Checklist
+
+* [ ] OAuth limited scopes; verification path prepared.
+* [ ] Secrets server‑side; no X‑API keys in FE.
+* [ ] Encryption at rest; KMS‑backed.
+* [ ] Mask PAN; drop addresses; store consent timestamp.
+* [ ] One‑tap delete + revoke; data retention 180d (configurable).
+* [ ] WAF/rate limiting; audit logs for access.
+
+---
+
+## R. Bank Codes (embed static)
+
+Paste the provided list as a JSON constant in FE for validation and select options.
+
+---
+
+## S. Proxy Pseudocode (Edge Worker)
+
+```js
+export default {
+  async fetch(req, env) {
+    const url = new URL(req.url);
+    if (url.pathname === '/cg/stmt/upload' && req.method === 'POST') {
+      const headers = new Headers(req.headers);
+      headers.set('x-api-key', env.BOOST_API_KEY);
+      headers.set('x-api-secret', env.BOOST_API_SECRET);
+      headers.set('Accept', 'application/json');
+      const boostUrl = env.BOOST_BASE_URL + '/bank-service/v1/statements' + (url.search||'');
+      const resp = await fetch(boostUrl, { method: 'POST', headers, body: req.body });
+      return new Response(resp.body, { status: resp.status, headers: resp.headers });
+    }
+    if (url.pathname.startsWith('/cg/stmt/') && url.pathname.endsWith('/content')) {
+      const id = url.pathname.split('/')[3];
+      const headers = new Headers({ 'x-api-key': env.BOOST_API_KEY, 'x-api-secret': env.BOOST_API_SECRET, 'Accept':'application/json' });
+      const boostUrl = `${env.BOOST_BASE_URL}/bank-service/v1/statements/${id}/content`;
+      const resp = await fetch(boostUrl, { headers });
+      return new Response(resp.body, { status: resp.status, headers: resp.headers });
+    }
+    return new Response('Not Found', { status: 404 });
+  }
+}
+```
+
+---
+
+## T. Mapping Function (deterministic first, then LLM)
+
+```ts
+function mapBucket(vendorCat?: string, desc?: string, isOnline?: boolean): CgBucket {
+  const s = (vendorCat || desc || '').toLowerCase();
+  const test = (re: RegExp) => re.test(s);
+  if (test(/swiggy|zomato|restaurant|dining|eats/)) return 'dining_or_going_out';
+  if (test(/blinkit|instamart|bigbasket|zepto/)) return 'grocery_spends_online';
+  if (test(/hpcl|iocl|bpcl|petrol|fuel|hindustan petroleum|indian oil|bharat petroleum/)) return 'fuel';
+  if (test(/flipkart/)) return 'flipkart_spends';
+  if (test(/amazon(?! pay.*bill)/)) return 'amazon_spends';
+  if (test(/indigo|vistara|airasia|spicejet|ixigo|irctc|makemytrip|ola|uber/)) return 'travel';
+  if (test(/electricity|water bill|gas bill|broadband|jio|airtel|vi|postpaid|prepaid|billpay/)) return 'utilities';
+  if (test(/school fee|tuition|college fee|education/)) return 'school_fees';
+  if (test(/rent|nobroker|housing rent|mygate/)) return 'rent';
+  return isOnline ? 'other_online_spends' : 'other_offline_spends';
+}
+```
+
+---
+
+## U. Consent & UX Copy (ready to paste)
+
+**Title:** Connect Gmail to auto‑find your statements
+**Body:** We’ll only scan emails from known card issuers to fetch your monthly credit‑card statements. We don’t read or store other emails. You can disconnect anytime and delete all data in one tap.
+**CTA:** Connect Gmail
+**Footnote:** Masked card numbers only. Data encrypted. Retention 180 days (you can change this later).
+
+---
+
+## V. Operational Playbook
+
+* **On‑call alerts**: BoostScore 5xx > 2% / 15 min; Gmail API error spikes; P95 parse latency > 45s.
+* **Daily checks**: coverage by issuer, parse success %, optimizer runs, missed‑savings distribution.
+* **Weekly**: expand regex dictionary; add sender/subject variants.
+
+---
+
+## W. Open Items
+
+* Card caps/exclusions reference table (seed CSV) for better explanations.
+* HTML statement parsers for issuers lacking PDFs.
+* Multi‑month ingestion (90‑day smoothing) and per‑card dedupe.
+
+---
+
+### Done‑for‑You Bundle
+
+This doc already includes: **API endpoints**, **schemas**, **mapping code**, **fixtures**, **UX copy**, **security checklist**, **SQL DDL**, **proxy pseudocode**, **no‑code recipes**, **acceptance tests**. You can paste each section into Cursor/Catalog/Retool/Make and go live with a tiny proxy.
+
+---
+
+## X. CardGenius Calculator API (Prod/UAT) – Contract for No‑Code
+
+> This section standardizes the **spend → recommendations** call so Canvas/Cursor/Make/Retool can invoke CardGenius safely.
+
+### X1. Endpoint(s)
+
+* **Primary (internal BK):**
+
+  * `POST https://card-recommendation-api-v2.bankkaro.com/cg/api/pro`
+* **Partner (tokened):**
+
+  * `POST https://uat-platform.bankkaro.com/partner/cardgenius/pro` *(swap base for PROD when ready)*
+
+**Headers**
+
+```
+Content-Type: application/json
+# If partner route is used
+partner-token: <JWT from BK partner dashboard>
+```
+
+### X2. Request Body (Monthly Spend Vector)
+
+All amounts in **INR per month**. Omit or set `0` if not applicable.
+
+```json
+{
+  "amazon_spends": 0,
+  "flipkart_spends": 0,
+  "grocery_spends_online": 0,
+  "online_food_ordering": 0,
+  "other_online_spends": 0,
+  "other_offline_spends": 0,
+  "dining_or_going_out": 0,
+  "fuel": 0,
+  "school_fees": 0,
+  "rent": 0,
+  "mobile_phone_bills": 0,
+  "utilities": 0,
+  "travel": 0,
+  "emi": 0,
+  "insurance": 0
+}
+```
+
+**Mapping source:** Use normalized statement buckets from §§ D/G to populate this vector.
+
+### X3. Example Calls
+
+**cURL**
+
+```bash
+curl -X POST 'https://card-recommendation-api-v2.bankkaro.com/cg/api/pro' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "amazon_spends": 12000,
+    "flipkart_spends": 5000,
+    "grocery_spends_online": 4000,
+    "online_food_ordering": 2500,
+    "other_online_spends": 3000,
+    "other_offline_spends": 7000,
+    "dining_or_going_out": 3500,
+    "fuel": 3000,
+    "utilities": 1200,
+    "travel": 0,
+    "school_fees": 0,
+    "rent": 0,
+    "mobile_phone_bills": 799,
+    "emi": 0,
+    "insurance": 0
+  }'
+```
+
+**Make/Zapier**: HTTP module → method POST → JSON body = spend vector; add `partner-token` header if partner route.
+
+### X4. Response (Typical)
+
+```json
+{
+  "status": "SUCCESS",
+  "cards": [
+    {
+      "card_id": "hdfc_millennia",
+      "card_name": "HDFC Millennia Credit Card",
+      "issuer": "HDFC",
+      "image_url": "https://cdn.bankkaro.com/cards/hdfc_millennia.png",
+      "reward_summary": {
+        "annual_savings_est": 9200,
+        "monthly_savings_est": 766,
+        "breakdown": [
+          { "bucket": "amazon_spends", "savings": 4800 },
+          { "bucket": "dining_or_going_out", "savings": 2400 },
+          { "bucket": "fuel", "savings": 1000 }
+        ]
+      },
+      "fees": { "joining": 500, "annual": 500 },
+      "milestone_benefits": [
+        "Spend ₹1L to get ₹1000 voucher",
+        "10X points on SmartBuy"
+      ],
+      "welcome_benefits": "₹500 cashback on first spend",
+      "net_gain_first_year": 8700
+    }
+  ],
+  "meta": {
+    "requested_spends": { "amazon_spends": 12000, "flipkart_spends": 5000, "fuel": 3000 },
+    "calculation_date": "2025-09-30T10:30:00Z"
+  }
+}
+```
+
+### X5. Errors & Limits
+
+* 400 invalid body → ensure numbers only.
+* 401/403 (partner) → token missing/expired.
+* 429 QPS exceeded → backoff (250–500 ms jitter); cache identical vectors for 5–15 min.
+* 5xx → retry up to 3x with exponential backoff.
+
+### X6. No‑Code Integration Guidance
+
+* **Canvas/Cursor**: call via serverless function that injects `partner-token` (never expose in browser). Cache by **hash(spend vector)**.
+* **Make/Zapier**: store token in a connection; throttle via built‑in rate limiter; write results into `optimizer_results` & show top‑3 cards.
+* **Retool**: resource = REST; transformer to compute `breakdown` table.
+
+### X7. Best Practices
+
+1. **Explain** savings: surface `reward_summary.breakdown` per bucket alongside card tiles.
+2. **Consistency**: Store `requested_spends` from `meta` for auditability.
+3. **Determinism**: Round rupee inputs to nearest ₹100 to improve cache hits without changing rank meaningfully.
+4. **A/B**: Flag `optimizer_enabled` to test uplift on lead gen.
+
+### X8. Contract Versioning
+
+* Current path: `/cg/api/pro` (stable). Keep a feature flag to switch base URL between **UAT** and **PROD**.
