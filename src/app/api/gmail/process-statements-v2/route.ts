@@ -401,12 +401,13 @@ Be thorough and accurate. Double-check Dr vs Cr classification. Remember: Financ
             $schema: 'http://json-schema.org/draft-07/schema#',
             type: 'object',
             additionalProperties: false,
-            required: ['bank', 'transactions'],
+            required: ['bank', 'transactions', 'card_details'],
             properties: {
               bank: { type: 'string' },
               card_details: {
                 type: 'object',
                 additionalProperties: false,
+                required: ['num', 'masked_number', 'card_type'],
                 properties: {
                   num: { type: 'string' },
                   masked_number: { type: 'string' },
