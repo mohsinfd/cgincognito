@@ -10,8 +10,9 @@ import { NextRequest, NextResponse } from 'next/server';
 const progressStore = new Map<string, {
   processed: number;
   total: number;
-  currentBank: string;
-  currentStatement: number;
+  currentStatement: any;
+  completedBanks: any[];
+  currentPhase: string;
   status: 'processing' | 'completed' | 'error';
   startTime: number;
   lastUpdate: number;
@@ -46,14 +47,16 @@ export async function GET(request: NextRequest) {
 
     const elapsedSeconds = Math.floor((Date.now() - progress.startTime) / 1000);
 
+    // Return in the format the frontend expects
     return NextResponse.json({
-      processed: progress.processed,
-      total: progress.total,
-      currentBank: progress.currentBank,
+      totalStatements: progress.total,
+      completedStatements: progress.processed,
       currentStatement: progress.currentStatement,
-      status: progress.status,
-      elapsedSeconds,
-      percentComplete: progress.total > 0 ? Math.floor((progress.processed / progress.total) * 100) : 0,
+      estimatedTimeRemaining: (progress.total - progress.processed) * 15,
+      elapsedTime: elapsedSeconds,
+      completedBanks: progress.completedBanks || [],
+      currentPhase: progress.currentPhase || 'pdf_processing',
+      phaseProgress: progress.total > 0 ? Math.floor((progress.processed / progress.total) * 100) : 0,
     });
 
   } catch (error: any) {
@@ -79,17 +82,19 @@ export async function POST(request: NextRequest) {
 
     const existingProgress = progressStore.get(sessionId);
 
-    // Extract values from the progress object
+    // Extract values from the progress object and preserve structure
     const processed = progress?.completedStatements ?? existingProgress?.processed ?? 0;
     const total = progress?.totalStatements ?? existingProgress?.total ?? 0;
-    const currentBank = progress?.currentStatement?.bankCode ?? existingProgress?.currentBank ?? '';
-    const currentStatementNum = progress?.completedStatements ?? existingProgress?.currentStatement ?? 0;
+    const currentStatement = progress?.currentStatement ?? existingProgress?.currentStatement ?? null;
+    const completedBanks = progress?.completedBanks ?? existingProgress?.completedBanks ?? [];
+    const currentPhase = progress?.currentPhase ?? existingProgress?.currentPhase ?? 'pdf_processing';
 
     progressStore.set(sessionId, {
       processed,
       total,
-      currentBank,
-      currentStatement: currentStatementNum,
+      currentStatement,
+      completedBanks,
+      currentPhase,
       status: 'processing',
       startTime: existingProgress?.startTime ?? Date.now(),
       lastUpdate: Date.now(),
