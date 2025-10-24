@@ -133,7 +133,7 @@ export default function RealTimeProcessingStatus({ totalStatements, sessionId, o
       case 'pdf_processing':
         if (progress.currentStatement) {
           const { bankCode, phase, attempts, maxAttempts, currentPassword } = progress.currentStatement;
-          const bankName = bankCode.toUpperCase();
+          const bankName = bankCode ? bankCode.toUpperCase() : 'BANK';
           
           switch (phase) {
             case 'download':
