@@ -335,6 +335,10 @@ ${text}
    - If no card number is visible, use "Unknown" for the num field
    - Always include both "num" (last 4 digits) and "masked_number" (full masked format)
    - Examples: "XXXX XXXX XXXX 1234" → num: "1234", masked_number: "XXXX XXXX XXXX 1234"
+   - **Extract the card type/name from the statement header, title, or branding**
+   - Look for card names like "MAGNUS", "Millenia", "Live+", "Cashback", "FIRST Wealth", "Shoprite", etc.
+   - The card_type field should contain the exact card name as shown on the statement
+   - Examples: "AXIS MAGNUS" → card_type: "MAGNUS", "FIRST Wealth" → card_type: "Wealth", "HDFC Millenia" → card_type: "Millenia"
 
 7. **Date Format:**
    - Always use YYYY-MM-DD format
@@ -345,7 +349,8 @@ ${text}
   "bank": "${bankCode}",
   "card_details": {
     "num": "1234",
-    "masked_number": "XXXX XXXX XXXX 1234"
+    "masked_number": "XXXX XXXX XXXX 1234",
+    "card_type": "MAGNUS"
   },
   "transactions": [
     {
