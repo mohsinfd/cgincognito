@@ -9,6 +9,7 @@ import { useState, useEffect } from 'react';
 import StatementVerification, { type FoundStatement } from '@/components/statement-verification';
 import RealTimeProcessingStatus from '@/components/real-time-processing-status';
 import NonSupportedBanks from '@/components/non-supported-banks';
+import TetrisGame from '@/components/tetris-game';
 import { saveStatement } from '@/lib/storage/browser-storage';
 
 export default function GmailTestPage() {
@@ -508,7 +509,9 @@ ${result.error ? `Error: ${result.error}` : ''}
 
   return (
     <div className="min-h-screen bg-gray-50 p-8">
-      <div className="max-w-2xl mx-auto">
+      <div className={processingStatus === 'processing' ? "max-w-7xl mx-auto" : "max-w-2xl mx-auto"}>
+        <div className={processingStatus === 'processing' ? "grid grid-cols-1 lg:grid-cols-2 gap-8" : ""}>
+          <div>
         <div className="flex justify-between items-start mb-8">
           <div>
             <h1 className="text-3xl font-bold mb-2">Gmail Integration Test</h1>
@@ -684,7 +687,44 @@ GOOGLE_REDIRECT_URI=http://localhost:3000/api/oauth2/callback`}
             ← Back to Home
           </a>
         </div>
+        </div>
+
+        {/* Tetris Game - Only show during processing */}
+        {processingStatus === 'processing' && (
+          <div className="hidden lg:flex justify-center items-start sticky top-8">
+            <TetrisGame isPlaying={processingStatus === 'processing'} />
+          </div>
+        )}
+        
+        {/* Success notification when parsing completes */}
+        {processingStatus === 'completed' && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg p-8 max-w-md text-center shadow-2xl">
+              <div className="text-6xl mb-4">🎉</div>
+              <h2 className="text-2xl font-bold mb-2">Statements Parsed!</h2>
+              <p className="text-gray-600 mb-6">
+                All your credit card statements have been successfully processed.
+              </p>
+              <div className="flex gap-4 justify-center">
+                <a
+                  href="/dashboard"
+                  className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 font-medium"
+                >
+                  📊 View Dashboard
+                </a>
+                <button
+                  onClick={() => setProcessingStatus('idle')}
+                  className="bg-gray-200 text-gray-700 px-6 py-3 rounded-lg hover:bg-gray-300 font-medium"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
       </div>
+    </div>
     </div>
   );
 }
