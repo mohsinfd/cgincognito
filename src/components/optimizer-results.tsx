@@ -14,6 +14,7 @@ import UnsupportedCardNotice from './unsupported-card-notice';
 import { detectAllOptimizations, OptimizationWarning } from '@/lib/optimizer/category-optimizer';
 import { getPopularCardForBank, isBankSupported, UNSUPPORTED_BANKS, getBankName, getCardsForBank } from '@/lib/optimizer/card-registry';
 import { autoMatchCard, type CardMatchResult } from '@/lib/optimizer/card-matcher';
+import CardSelectionModal from './card-selection-modal';
 
 type Props = {
   statements: any[];
@@ -28,6 +29,55 @@ export default function OptimizerResults({ statements, selectedMonth }: Props) {
   const [unsupportedBanks, setUnsupportedBanks] = useState<string[]>([]);
   const [cardMatches, setCardMatches] = useState<Record<string, CardMatchResult>>({});
   const [needsUserInput, setNeedsUserInput] = useState<Record<string, boolean>>({});
+  const [cardSelectionModal, setCardSelectionModal] = useState<{
+    isOpen: boolean;
+    bankCode: string;
+    bankName: string;
+  }>({ isOpen: false, bankCode: '', bankName: '' });
+
+  // Function to process a manually selected card
+  const processSelectedCard = async (bankCode: string, selectedCard: any) => {
+    try {
+      console.log(`🔍 Processing manually selected card for ${bankCode}: ${selectedCard.name}`);
+      
+      // Build spend vector for this bank
+      const spendVector = buildSpendVector(statements, selectedMonth);
+      
+      // Call API with selected_card_id
+      const userCardResponse = await fetch('https://card-recommendation-api-v2.bankkaro.com/cg/api/beta', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          ...spendVector,
+          selected_card_id: selectedCard.id,
+        }),
+      });
+
+      if (!userCardResponse.ok) {
+        throw new Error(`API call failed: ${userCardResponse.status}`);
+      }
+
+      const userCards = await userCardResponse.json();
+      
+      if (!Array.isArray(userCards) || userCards.length === 0) {
+        throw new Error('Invalid response from CardGenius API');
+      }
+
+      // Process optimization warnings
+      const warnings = detectAllOptimizations(userCards, spendVector);
+      setOptimizationWarnings(prev => ({
+        ...prev,
+        [bankCode]: warnings
+      }));
+
+      console.log(`✅ Processed manual card selection for ${bankCode}`);
+      
+    } catch (error) {
+      console.error(`❌ Failed to process manual card selection for ${bankCode}:`, error);
+    }
+  };
 
   useEffect(() => {
     if (statements.length === 0) return;
@@ -120,17 +170,18 @@ export default function OptimizerResults({ statements, selectedMonth }: Props) {
           matches[bankCode] = matchResult;
           needsInput[bankCode] = false;
         } else {
-          // Not confident, fallback to popular card but flag for user input
-          const popularCard = getPopularCardForBank(bankCode);
+          // Not confident or no match - show card selection modal
+          console.log(`⚠️ Low confidence match for ${bankCode} (${matchResult?.confidence || 0}%). Opening card selection modal.`);
           
-          if (!popularCard) {
-            console.log(`⚠️ No popular card found for ${bankCode}`);
-            continue;
-          }
+          // Store the bank info for the modal
+          setCardSelectionModal({
+            isOpen: true,
+            bankCode,
+            bankName: getBankName(bankCode)
+          });
           
-          console.log(`⚠️ Low confidence match for ${bankCode} (${matchResult?.confidence || 0}%). Using ${popularCard.name} as fallback, but needs user confirmation.`);
-          selectedCard = popularCard;
-          needsInput[bankCode] = true;
+          // Skip this bank for now - will be processed after user selects card
+          continue;
         }
         
         console.log(`🔍 Analyzing ${bankCode} with card ID ${selectedCard.id} (${selectedCard.name})...`);
@@ -439,6 +490,35 @@ export default function OptimizerResults({ statements, selectedMonth }: Props) {
           Compare All Cards
         </button>
       </div>
+
+      {/* Card Selection Modal */}
+      <CardSelectionModal
+        isOpen={cardSelectionModal.isOpen}
+        bankCode={cardSelectionModal.bankCode}
+        bankName={cardSelectionModal.bankName}
+        availableCards={getCardsForBank(cardSelectionModal.bankCode)}
+        onCardSelected={(card) => {
+          console.log(`✅ User selected card: ${card.name} for ${cardSelectionModal.bankCode}`);
+          // Process the selected card
+          processSelectedCard(cardSelectionModal.bankCode, card);
+          setCardSelectionModal({ isOpen: false, bankCode: '', bankName: '' });
+        }}
+        onManualEntry={(cardName) => {
+          console.log(`✅ User entered manual card: ${cardName} for ${cardSelectionModal.bankCode}`);
+          // Create a manual card entry
+          const manualCard = {
+            id: 999, // Temporary ID for manual entries
+            name: cardName,
+            bankId: getCardsForBank(cardSelectionModal.bankCode)[0]?.bankId || 0,
+            bankName: cardSelectionModal.bankName
+          };
+          processSelectedCard(cardSelectionModal.bankCode, manualCard);
+          setCardSelectionModal({ isOpen: false, bankCode: '', bankName: '' });
+        }}
+        onClose={() => {
+          setCardSelectionModal({ isOpen: false, bankCode: '', bankName: '' });
+        }}
+      />
     </div>
   );
 }
