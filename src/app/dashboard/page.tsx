@@ -59,9 +59,12 @@ export default function DashboardPage() {
       
       const needsReview = getTransactionsNeedingReview(allTransactions);
       console.log(`🔍 Found ${needsReview.length} transactions needing review:`, 
-        needsReview.map(t => `${t.description} (${t.reason})`));
+        needsReview.map(index => {
+          const txn = allTransactions[index];
+          return txn ? `${txn.description || txn.raw_desc || 'Unknown'} (${txn.vendor_cat || 'No category'})` : 'undefined (undefined)';
+        }));
       
-      setTransactionsToReview(needsReview);
+      setTransactionsToReview(needsReview.map(index => allTransactions[index]).filter(Boolean));
       
       // Auto-select most recent month
       if (stored.length > 0) {
@@ -76,9 +79,9 @@ export default function DashboardPage() {
             // Handle different date formats
             let year, month;
             if (date.length === 8 && /^\d{8}$/.test(date)) {
-              // DDMMYYYY format
-              year = date.substring(4, 8);
-              month = date.substring(2, 4);
+              // YYYYMMDD format (e.g., "20251024" = 24 Oct 2025)
+              year = date.substring(0, 4);
+              month = date.substring(4, 6);
             } else if (date.includes('-')) {
               // YYYY-MM-DD or YYYY-MM format
               const parts = date.split('-');
