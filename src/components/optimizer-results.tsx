@@ -37,7 +37,7 @@ export default function OptimizerResults({ statements, selectedMonth }: Props) {
       const spendVector = buildSpendVector(statements);
       
       // Call CG Calculator API
-      const response = await fetch('https://card-recommendation-api-v2.bankkaro.com/cg/api/pro', {
+      const response = await fetch('https://card-recommendation-api-v2.bankkaro.com/cg/api/beta', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -51,15 +51,27 @@ export default function OptimizerResults({ statements, selectedMonth }: Props) {
 
       const data = await response.json();
       
+      console.log('🎯 Raw CardGenius API response:', data);
+      
+      // Validate response
+      if (!Array.isArray(data)) {
+        console.error('❌ API response is not an array:', typeof data, data);
+        throw new Error('Invalid API response format - expected array of cards');
+      }
+      
       // Filter to valid cards only
       const VALID_CARD_IDS = [8,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,29,30,31,32,33,34,35,36,39,40,41,43,44,45,46,47,49,50,51,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78];
-      const filteredCards = Array.isArray(data) ? data.filter(card => VALID_CARD_IDS.includes(card.id)) : [];
+      const filteredCards = data.filter(card => VALID_CARD_IDS.includes(card.id));
       
       console.log('🎯 CardGenius API response:', {
         totalCards: data.length,
         filteredCards: filteredCards.length,
         topCards: filteredCards.slice(0, 5).map(c => ({ name: c.card_name, savings: c.total_savings }))
       });
+      
+      if (filteredCards.length === 0) {
+        console.warn('⚠️ No valid cards after filtering');
+      }
       
       setRecommendations(filteredCards);
     } catch (err: any) {
