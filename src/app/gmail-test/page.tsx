@@ -9,7 +9,7 @@ import { useState, useEffect } from 'react';
 import StatementVerification, { type FoundStatement } from '@/components/statement-verification';
 import RealTimeProcessingStatus from '@/components/real-time-processing-status';
 import NonSupportedBanks from '@/components/non-supported-banks';
-import TetrisGame from '@/components/tetris-game';
+import GameSelector from '@/components/game-selector';
 import { saveStatement } from '@/lib/storage/browser-storage';
 
 export default function GmailTestPage() {
@@ -689,10 +689,10 @@ GOOGLE_REDIRECT_URI=http://localhost:3000/api/oauth2/callback`}
         </div>
         </div>
 
-        {/* Tetris Game - Only show during processing */}
+        {/* Game Selector - Only show during processing */}
         {processingStatus === 'processing' && (
           <div className="hidden lg:flex justify-center items-start sticky top-8">
-            <TetrisGame isPlaying={processingStatus === 'processing'} />
+            <GameSelector isPlaying={processingStatus === 'processing'} />
           </div>
         )}
         

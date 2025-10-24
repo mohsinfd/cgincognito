@@ -2,16 +2,23 @@
 
 ## Current Implementation
 
-We've integrated **Tetris** as a fun distraction while credit card statements are being parsed. The game appears on the right side of the screen during processing.
+We've integrated **THREE GAMES** as fun distractions while credit card statements are being parsed. Users can choose their favorite game!
+
+### Games Available:
+1. **🎮 Tetris** - Classic block-stacking game
+2. **🐍 Snake** - Eat food, grow longer, don't hit walls!
+3. **🍄 Super Jump** - Mario-style platformer (collect 5 coins to win!)
 
 ### Features:
-- ✅ Classic Tetris gameplay
-- ✅ Keyboard controls (Arrow keys + Space)
+- ✅ **Game Selector** - Switch between games anytime
+- ✅ Three complete games (Tetris, Snake, Mario)
+- ✅ Keyboard controls (Arrow keys + WASD)
 - ✅ Pause functionality (P key)
 - ✅ Score tracking
 - ✅ Auto-pauses when parsing completes
 - ✅ Success notification modal
 - ✅ Responsive (hidden on mobile, shown on desktop)
+- ✅ Lightweight (~40KB total, no external dependencies!)
 
 ---
 
