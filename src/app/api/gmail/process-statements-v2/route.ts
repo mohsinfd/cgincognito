@@ -404,6 +404,14 @@ Be thorough and accurate. Double-check Dr vs Cr classification. Remember: Financ
             required: ['bank', 'transactions'],
             properties: {
               bank: { type: 'string' },
+              card_details: {
+                type: 'object',
+                properties: {
+                  num: { type: 'string' },
+                  masked_number: { type: 'string' },
+                  card_type: { type: 'string' }
+                }
+              },
               transactions: {
                 type: 'array',
                 items: {

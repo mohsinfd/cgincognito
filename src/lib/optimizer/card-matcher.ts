@@ -161,8 +161,11 @@ export function extractCardInfoFromStatement(statement: any): {
   bankId: number | null;
 } {
   // Try multiple paths for card type
+  // Data from Gmail processing is stored in: processing_result.parsedData.card_details.card_type
+  // Data from localStorage is in: content.content.card_details.card_type
   const cardType = 
-    statement.content?.content?.card_details?.card_type ||
+    statement.processing_result?.parsedData?.card_details?.card_type ||  // From Gmail processing
+    statement.content?.content?.card_details?.card_type ||                // From localStorage
     statement.content?.card_details?.card_type ||
     statement.card_details?.card_type ||
     null;
@@ -170,6 +173,8 @@ export function extractCardInfoFromStatement(statement: any): {
   // Try multiple paths for bank code
   const bankCode = (
     statement.bankCode ||
+    statement.bank_code ||
+    statement.processing_result?.parsedData?.bank ||
     statement.content?.content?.bank ||
     statement.content?.bank ||
     statement.bank ||
@@ -200,6 +205,11 @@ export function extractCardInfoFromStatement(statement: any): {
     cardType,
     bankCode,
     bankId,
+    // Debug: show which path worked
+    source: statement.processing_result?.parsedData?.card_details?.card_type ? 'processing_result' :
+            statement.content?.content?.card_details?.card_type ? 'content.content' :
+            statement.content?.card_details?.card_type ? 'content' :
+            statement.card_details?.card_type ? 'direct' : 'none'
   });
 
   return { cardType, bankId };
