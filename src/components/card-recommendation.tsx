@@ -40,7 +40,7 @@ export default function CardRecommendation({ card, rank, isTop }: Props) {
             <h3 className="text-xl font-bold text-gray-900 mb-1">
               {card.card_name}
             </h3>
-            <p className="text-sm text-gray-600">{card.issuer}</p>
+            <p className="text-sm text-gray-600">{card.bank_name}</p>
           </div>
         </div>
 
@@ -89,13 +89,19 @@ export default function CardRecommendation({ card, rank, isTop }: Props) {
           </div>
         </div>
 
-        {/* Welcome Benefits */}
-        {card.welcomeBenefits && card.welcomeBenefits.length > 0 && (
-          <div className="bg-blue-50 rounded-lg p-3 mb-4">
-            <p className="text-xs text-blue-700 font-semibold mb-1">Welcome Offer</p>
-            <p className="text-sm text-blue-900">
-              ₹{card.welcomeBenefits[0].cash_value?.toLocaleString()} voucher
-            </p>
+        {/* Rating */}
+        {card.rating && (
+          <div className="flex items-center gap-2 mb-4">
+            <div className="flex">
+              {[...Array(5)].map((_, i) => (
+                <span key={i} className={`text-lg ${i < card.rating ? 'text-yellow-400' : 'text-gray-300'}`}>
+                  ★
+                </span>
+              ))}
+            </div>
+            <span className="text-sm text-gray-600">
+              ({card.user_rating_count} reviews)
+            </span>
           </div>
         )}
 

@@ -9,6 +9,8 @@ import { useEffect, useState } from 'react';
 import type { CGSpendVector, CGCalculatorResponse } from '@/types/optimizer';
 import { mapBucket } from '@/lib/mapper/rules';
 import CardRecommendation from './card-recommendation';
+import CapWarningComponent from './cap-warning';
+import { detectCapWarnings } from '@/lib/optimizer/cap-detector';
 
 type Props = {
   statements: any[];
@@ -48,7 +50,18 @@ export default function OptimizerResults({ statements, selectedMonth }: Props) {
       }
 
       const data = await response.json();
-      setRecommendations(data);
+      
+      // Filter to valid cards only
+      const VALID_CARD_IDS = [8,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,29,30,31,32,33,34,35,36,39,40,41,43,44,45,46,47,49,50,51,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78];
+      const filteredCards = Array.isArray(data) ? data.filter(card => VALID_CARD_IDS.includes(card.id)) : [];
+      
+      console.log('🎯 CardGenius API response:', {
+        totalCards: data.length,
+        filteredCards: filteredCards.length,
+        topCards: filteredCards.slice(0, 5).map(c => ({ name: c.card_name, savings: c.total_savings }))
+      });
+      
+      setRecommendations(filteredCards);
     } catch (err: any) {
       console.error('Optimizer error:', err);
       setError(err.message || 'Failed to calculate recommendations');
@@ -166,7 +179,7 @@ export default function OptimizerResults({ statements, selectedMonth }: Props) {
     );
   }
 
-  if (!recommendations || !recommendations.cards || recommendations.cards.length === 0) {
+  if (!recommendations || !Array.isArray(recommendations) || recommendations.length === 0) {
     return (
       <div className="bg-gray-50 rounded-lg p-12 text-center">
         <p className="text-gray-600">No recommendations available</p>
@@ -174,12 +187,18 @@ export default function OptimizerResults({ statements, selectedMonth }: Props) {
     );
   }
 
-  const topCard = recommendations.cards[0];
+  const topCard = recommendations[0];
   const monthlySavings = topCard.total_savings || 0;
   const annualSavings = topCard.total_savings_yearly || 0;
 
+  // Detect cap warnings
+  const capWarnings = detectCapWarnings(recommendations);
+
   return (
     <div className="space-y-8">
+      {/* Cap Warnings */}
+      {capWarnings.length > 0 && <CapWarningComponent warnings={capWarnings} />}
+
       {/* Missed Savings Hero */}
       <div className="bg-gradient-to-r from-green-500 to-emerald-600 rounded-lg shadow-xl p-8 text-white">
         <div className="flex items-center gap-6">
@@ -211,9 +230,9 @@ export default function OptimizerResults({ statements, selectedMonth }: Props) {
         </div>
 
         <div className="grid md:grid-cols-2 gap-6">
-          {recommendations.cards.slice(0, 4).map((card, index) => (
+          {recommendations.slice(0, 5).map((card, index) => (
             <CardRecommendation
-              key={card.card_id}
+              key={card.id}
               card={card}
               rank={index + 1}
               isTop={index === 0}

@@ -92,32 +92,36 @@ export type CGSpendVector = {
 export type CGSpendVectorComplete = CGSpendVector;
 
 export type CGCardRecommendation = {
-  card_id: string;
+  id: number;
   card_name: string;
-  issuer: string;
-  image_url: string;
-  reward_summary: {
-    annual_savings_est: number;
-    monthly_savings_est: number;
-    breakdown: Array<{
-      bucket: string;
-      savings: number;
-    }>;
-  };
-  fees: {
-    joining: number;
-    annual: number;
-  };
-  milestone_benefits: string[];
-  welcome_benefits: string;
-  net_gain_first_year: number;
+  bank_name: string;
+  bank_id: number;
+  card_type: string;
+  image: string;
+  total_savings: number;
+  total_savings_yearly: number;
+  roi: number;
+  joining_fees: string;
+  spending_breakdown_array: Array<{
+    on: string;
+    spend: number;
+    savings: number;
+    maxCap: number;
+    totalMaxCap: number;
+    cashback_percentage: string;
+    explanation: string[];
+  }>;
+  product_usps: Array<{
+    id: number;
+    header: string;
+    description: string;
+    priority: number;
+  }>;
+  tags: string;
+  rating: number;
+  user_rating_count: number;
+  seo_card_alias?: string;
+  ck_rewards?: number;
 };
 
-export type CGCalculatorResponse = {
-  status: string;
-  cards: CGCardRecommendation[];
-  meta: {
-    requested_spends: Partial<CGSpendVector>;
-    calculation_date: string;
-  };
-};
+export type CGCalculatorResponse = CGCardRecommendation[]; // API returns array directly
