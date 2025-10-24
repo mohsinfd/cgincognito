@@ -404,6 +404,15 @@ Be thorough and accurate. Double-check Dr vs Cr classification. Remember: Financ
             required: ['bank', 'transactions'],
             properties: {
               bank: { type: 'string' },
+              card_details: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  num: { type: 'string' },
+                  masked_number: { type: 'string' },
+                  card_type: { type: 'string' }
+                }
+              },
               transactions: {
                 type: 'array',
                 items: {
@@ -437,6 +446,14 @@ Be thorough and accurate. Double-check Dr vs Cr classification. Remember: Financ
     }
 
     const parsed = JSON.parse(content);
+    
+    // Debug: Log what the LLM actually returned
+    console.log('🔍 LLM Response Debug:', {
+      hasCardDetails: !!parsed.card_details,
+      cardDetailsKeys: parsed.card_details ? Object.keys(parsed.card_details) : [],
+      cardDetailsValue: parsed.card_details,
+      allKeys: Object.keys(parsed)
+    });
     
     // Post-processing: Filter out any bank fees/charges that LLM might have missed
     const originalCount = parsed.transactions?.length || 0;
