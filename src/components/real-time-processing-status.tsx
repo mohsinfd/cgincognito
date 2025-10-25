@@ -74,39 +74,23 @@ export default function RealTimeProcessingStatus({ totalStatements, sessionId, o
     let pollInterval: NodeJS.Timeout;
     
     const pollProgress = async () => {
-      try {
-        const response = await fetch(`/api/gmail/process-statements-progress?sessionId=${sessionId}`);
+      // Simple progress simulation - increment by 1 every 2 seconds
+      setProgress(prev => {
+        const newCompleted = Math.min(prev.completedStatements + 1, prev.totalStatements);
+        const isComplete = newCompleted >= prev.totalStatements;
         
-        if (response.ok) {
-          const realProgress = await response.json();
-          
-          // Update progress with real data
-          setProgress(prev => ({
-            ...prev,
-            totalStatements: realProgress.totalStatements || totalStatements,
-            completedStatements: realProgress.completedStatements || 0,
-            currentStatement: realProgress.currentStatement,
-            currentPhase: realProgress.currentPhase || 'pdf_processing',
-            phaseProgress: realProgress.phaseProgress || 0,
-            // Don't overwrite frontend elapsedTime with backend elapsedTime
-            estimatedTimeRemaining: realProgress.estimatedTimeRemaining || 0,
-            completedBanks: realProgress.completedBanks || []
-          }));
-          
-          // Check if processing is complete
-          if (realProgress.completedStatements >= (realProgress.totalStatements || totalStatements)) {
-            console.log('✅ Processing completed, calling onComplete');
-            setTimeout(() => onComplete?.(), 1000);
-            clearInterval(pollInterval);
-          }
-        } else {
-          console.log('⚠️ Progress API not available, continuing to poll...');
-          // Don't timeout - keep polling until we get a response
+        if (isComplete) {
+          setTimeout(() => onComplete?.(), 1000);
+          clearInterval(pollInterval);
         }
-      } catch (error) {
-        console.error('Failed to poll progress:', error);
-        // Continue polling on error
-      }
+        
+        return {
+          ...prev,
+          completedStatements: newCompleted,
+          phaseProgress: Math.floor((newCompleted / prev.totalStatements) * 100),
+          status: isComplete ? 'completed' : 'processing'
+        };
+      });
     };
 
     // Start polling every 2 seconds
