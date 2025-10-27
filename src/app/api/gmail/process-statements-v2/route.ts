@@ -257,6 +257,9 @@ async function parseWithOpenAI(text: string, bankCode: string): Promise<{ succes
     // Two-stage categorization: Import pre-categorizer
     const { preCategorize, shouldUsePreCategory } = await import('@/lib/mapper/pre-categorizer');
 
+    // STEP 1: Extract ALL transactions from text first
+    // (We'll pre-categorize AFTER extraction to avoid duplicate work)
+    
     const prompt = `You are an expert credit card statement parser for Indian credit cards. Extract ALL transaction data accurately.
 
 **Bank:** ${bankCode}
@@ -493,21 +496,25 @@ Be thorough and accurate. Double-check Dr vs Cr classification. Remember: Financ
         console.log(`   📝 Post-processing filtered ${filteredCount} fee/charge transactions`);
       }
       
-      // Apply pre-categorization for confidence checking (not to override LLM)
+      // STEP 2: Apply pre-categorization (override LLM when confident)
       let regexMatches = 0;
-      let highConfidenceMatches = 0;
+      let overriddenByRegex = 0;
       
       parsed.transactions.forEach((t: any) => {
         const preCat = preCategorize(t.description, t.amount);
         if (preCat.category) {
           regexMatches++;
           if (shouldUsePreCategory(preCat)) {
-            highConfidenceMatches++;
-            // Log when LLM matches regex
-            if (preCat.category === t.category) {
-              console.log(`   ✅ Regex confirmed: ${t.description} → ${t.category}`);
+            // Override LLM category if regex is confident
+            const oldCategory = t.category;
+            t.category = preCat.category;
+            t.vendor_cat = preCat.category;
+            
+            if (oldCategory !== preCat.category) {
+              overriddenByRegex++;
+              console.log(`   🔄 Regex override: ${t.description} → ${oldCategory} → ${preCat.category}`);
             } else {
-              console.log(`   🔄 Regex diff: ${t.description} → LLM: ${t.category}, Regex: ${preCat.category}`);
+              console.log(`   ✅ Regex confirmed: ${t.description} → ${t.category}`);
             }
           }
         }
@@ -516,7 +523,8 @@ Be thorough and accurate. Double-check Dr vs Cr classification. Remember: Financ
       if (regexMatches > 0) {
         console.log(`\n📊 Pre-categorization stats:`);
         console.log(`   Regex matched: ${regexMatches}/${parsed.transactions.length} transactions`);
-        console.log(`   High confidence: ${highConfidenceMatches} (could skip LLM)`);
+        console.log(`   Overridden LLM: ${overriddenByRegex} transactions`);
+        console.log(`   Cost savings: ~${Math.round((regexMatches / parsed.transactions.length) * 100)}% could skip LLM in future`);
       }
       
       // Log final kept transactions
