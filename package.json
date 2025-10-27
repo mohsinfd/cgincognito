@@ -30,10 +30,12 @@
     "pdf-parse": "^1.1.1",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^4.6.82",
-    "qpdf-bin": "^1.1.1",
     "openai": "^4.38.0",
     "@anthropic-ai/sdk": "^0.20.0",
     "@google/generative-ai": "^0.7.1"
+  },
+  "optionalDependencies": {
+    "qpdf-bin": "^1.1.1"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",
