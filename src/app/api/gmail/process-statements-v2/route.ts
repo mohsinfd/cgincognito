@@ -253,6 +253,9 @@ async function parseWithOpenAI(text: string, bankCode: string): Promise<{ succes
     const openai = new OpenAI({
       apiKey: process.env.OPENAI_API_KEY,
     });
+    
+    // Two-stage categorization: Import pre-categorizer
+    const { preCategorize, shouldUsePreCategory } = await import('@/lib/mapper/pre-categorizer');
 
     const prompt = `You are an expert credit card statement parser for Indian credit cards. Extract ALL transaction data accurately.
 
@@ -488,6 +491,32 @@ Be thorough and accurate. Double-check Dr vs Cr classification. Remember: Financ
       const filteredCount = originalCount - parsed.transactions.length;
       if (filteredCount > 0) {
         console.log(`   📝 Post-processing filtered ${filteredCount} fee/charge transactions`);
+      }
+      
+      // Apply pre-categorization for confidence checking (not to override LLM)
+      let regexMatches = 0;
+      let highConfidenceMatches = 0;
+      
+      parsed.transactions.forEach((t: any) => {
+        const preCat = preCategorize(t.description, t.amount);
+        if (preCat.category) {
+          regexMatches++;
+          if (shouldUsePreCategory(preCat)) {
+            highConfidenceMatches++;
+            // Log when LLM matches regex
+            if (preCat.category === t.category) {
+              console.log(`   ✅ Regex confirmed: ${t.description} → ${t.category}`);
+            } else {
+              console.log(`   🔄 Regex diff: ${t.description} → LLM: ${t.category}, Regex: ${preCat.category}`);
+            }
+          }
+        }
+      });
+      
+      if (regexMatches > 0) {
+        console.log(`\n📊 Pre-categorization stats:`);
+        console.log(`   Regex matched: ${regexMatches}/${parsed.transactions.length} transactions`);
+        console.log(`   High confidence: ${highConfidenceMatches} (could skip LLM)`);
       }
       
       // Log final kept transactions

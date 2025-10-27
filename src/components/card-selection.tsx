@@ -13,6 +13,7 @@ interface CardSelectionProps {
   bankCode: string;
   bankName: string;
   availableCards: CardInfo[];
+  mostLikelyCard?: CardInfo | null;
   onCardSelected: (card: CardInfo | null) => void;
   onManualEntry: (cardName: string) => void;
 }
@@ -21,6 +22,7 @@ export default function CardSelection({
   bankCode,
   bankName,
   availableCards,
+  mostLikelyCard,
   onCardSelected,
   onManualEntry
 }: CardSelectionProps) {
@@ -35,6 +37,10 @@ export default function CardSelection({
     if (manualCardName.trim()) {
       onManualEntry(manualCardName.trim());
     }
+  };
+
+  const isMostLikely = (card: CardInfo) => {
+    return mostLikelyCard && card.id === mostLikelyCard.id;
   };
 
   return (
@@ -55,15 +61,27 @@ export default function CardSelection({
           <div className="mb-4">
             <h4 className="font-medium text-gray-900 mb-3">Available {bankName} Cards:</h4>
             <div className="space-y-2 max-h-60 overflow-y-auto">
-              {availableCards.map((card) => (
-                <button
-                  key={card.id}
-                  onClick={() => handleCardSelect(card)}
-                  className="w-full text-left p-3 border border-gray-200 rounded-lg hover:border-blue-500 hover:bg-blue-50 transition-colors"
-                >
-                  <div className="font-medium text-gray-900">{card.name}</div>
-                </button>
-              ))}
+              {availableCards.map((card) => {
+                const isLikely = isMostLikely(card);
+                return (
+                  <button
+                    key={card.id}
+                    onClick={() => handleCardSelect(card)}
+                    className={`w-full text-left p-3 border rounded-lg transition-colors relative ${
+                      isLikely
+                        ? 'border-green-500 bg-green-50 hover:bg-green-100'
+                        : 'border-gray-200 hover:border-blue-500 hover:bg-blue-50'
+                    }`}
+                  >
+                    <div className="font-medium text-gray-900">{card.name}</div>
+                    {isLikely && (
+                      <span className="absolute top-2 right-2 text-xs bg-green-600 text-white px-2 py-1 rounded-full">
+                        ✓ Best Match
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
             </div>
           </div>
 

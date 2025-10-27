@@ -10,6 +10,8 @@ import StatementVerification, { type FoundStatement } from '@/components/stateme
 import RealTimeProcessingStatus from '@/components/real-time-processing-status';
 import NonSupportedBanks from '@/components/non-supported-banks';
 import GameSelector from '@/components/game-selector';
+import SignupForm, { type SignupData } from '@/components/signup-form';
+import ParsingLogViewer from '@/components/parsing-log-viewer';
 import { saveStatement } from '@/lib/storage/browser-storage';
 
 export default function GmailTestPage() {
@@ -17,6 +19,8 @@ export default function GmailTestPage() {
   const [status, setStatus] = useState<'disconnected' | 'connecting' | 'connected'>('disconnected');
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showSignup, setShowSignup] = useState(false);
+  const [signupLoading, setSignupLoading] = useState(false);
   const [foundStatements, setFoundStatements] = useState<FoundStatement[]>([]);
   const [showVerification, setShowVerification] = useState(false);
   const [syncLoading, setSyncLoading] = useState(false);
@@ -48,9 +52,8 @@ export default function GmailTestPage() {
       }));
       
       // Get user email from Gmail API if not provided
-      if (email && email !== 'unknown') {
-        setUserEmail(email);
-      } else {
+      let userEmailValue = email;
+      if (!email || email === 'unknown') {
         // Fetch email from Gmail API
         fetch('/api/gmail/user-info', {
           method: 'POST',
@@ -60,7 +63,15 @@ export default function GmailTestPage() {
         .then(res => res.json())
         .then(data => {
           if (data.success) {
-            setUserEmail(data.email);
+            const finalEmail = data.email;
+            setUserEmail(finalEmail);
+            
+            // Check if user has already signed up
+            const existingUser = localStorage.getItem('cardgenius_user');
+            if (!existingUser && finalEmail) {
+              // First time user - show signup form
+              setShowSignup(true);
+            }
           } else {
             setUserEmail('Connected (email unknown)');
           }
@@ -68,6 +79,15 @@ export default function GmailTestPage() {
         .catch(() => {
           setUserEmail('Connected (email unknown)');
         });
+      } else {
+        setUserEmail(userEmailValue);
+        
+        // Check if user has already signed up
+        const existingUser = localStorage.getItem('cardgenius_user');
+        if (!existingUser && userEmailValue) {
+          // First time user - show signup form
+          setShowSignup(true);
+        }
       }
       
       // Clean URL
@@ -100,6 +120,38 @@ export default function GmailTestPage() {
       console.error('Failed to connect Gmail:', err);
       setError(err.message || 'Failed to connect Gmail');
       setConnecting(false);
+    }
+  };
+
+  const handleSignup = async (signupData: SignupData) => {
+    setSignupLoading(true);
+    
+    try {
+      // Store user info in localStorage
+      const userData = {
+        email: userEmail,
+        name: signupData.name,
+        dob: signupData.dob,
+        createdAt: new Date().toISOString()
+      };
+      
+      localStorage.setItem('cardgenius_user', JSON.stringify(userData));
+      
+      console.log('✅ User signup completed:', userData);
+      
+      // Hide signup form and proceed to sync
+      setShowSignup(false);
+      
+      // Automatically start sync after signup
+      setTimeout(() => {
+        testSync();
+      }, 500);
+      
+    } catch (err: any) {
+      console.error('Signup error:', err);
+      setError(err.message || 'Failed to complete signup');
+    } finally {
+      setSignupLoading(false);
     }
   };
 
@@ -276,7 +328,8 @@ export default function GmailTestPage() {
                   summary: {
                     statement_date: parsedData.summary?.statement_date || 
                                    parsedData.statement_date || 
-                                   new Date().toISOString().split('T')[0]?.replace(/-/g, '') || '',
+                                   // Use email date as fallback (convert to YYYYMMDD format)
+                                   (stmt.date ? new Date(stmt.date).toISOString().split('T')[0]?.replace(/-/g, '') || '' : ''),
                     total_dues: parsedData.summary?.total_dues || 
                                parsedData.total_amount || 
                                totalAmount,
@@ -343,7 +396,8 @@ ${savedCount > 0 ?
 Check console for detailed results!
       `;
 
-      alert(summary);
+      // Log summary to console instead of alert
+      console.log('✅ Processing Summary:', summary);
       
       // Update processing status
       setProcessingStatus('completed');
@@ -352,14 +406,11 @@ Check console for detailed results!
       setShowVerification(false);
       setFoundStatements([]);
 
-      // If statements were saved, suggest visiting dashboard
+      // If statements were saved, automatically redirect to dashboard after a delay
       if (savedCount > 0) {
         setTimeout(() => {
-          const goToDashboard = confirm('Would you like to view your spending insights on the Dashboard?');
-          if (goToDashboard) {
-            window.location.href = '/dashboard';
-          }
-        }, 1000);
+          window.location.href = '/dashboard';
+        }, 2000); // 2 second delay to let user see completion
       }
 
     } catch (err: any) {
@@ -509,6 +560,35 @@ ${result.error ? `Error: ${result.error}` : ''}
 
   return (
     <div className="min-h-screen bg-gray-50 p-8">
+      {/* Signup Form Modal - Show for first-time users */}
+      {showSignup && userEmail && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 overflow-y-auto">
+          <SignupForm
+            email={userEmail}
+            onSubmit={handleSignup}
+            loading={signupLoading}
+          />
+        </div>
+      )}
+      
+      {/* Show signup prompt if connected but no user data */}
+      {status === 'connected' && !showSignup && !localStorage.getItem('cardgenius_user') && userEmail && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg p-8 max-w-md text-center">
+            <h2 className="text-2xl font-bold mb-4">Complete Your Profile</h2>
+            <p className="text-gray-600 mb-6">
+              To process your statements, we need a few details. This will take less than a minute.
+            </p>
+            <button
+              onClick={() => setShowSignup(true)}
+              className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700"
+            >
+              Continue
+            </button>
+          </div>
+        </div>
+      )}
+      
       <div className={processingStatus === 'processing' ? "max-w-7xl mx-auto" : "max-w-2xl mx-auto"}>
         <div className={processingStatus === 'processing' ? "grid grid-cols-1 lg:grid-cols-2 gap-8" : ""}>
           <div>
@@ -689,10 +769,11 @@ GOOGLE_REDIRECT_URI=http://localhost:3000/api/oauth2/callback`}
         </div>
         </div>
 
-        {/* Game Selector - Only show during processing */}
+        {/* Right Sidebar - Games and Logs during processing */}
         {processingStatus === 'processing' && (
-          <div className="hidden lg:flex justify-center items-start sticky top-8">
+          <div className="hidden lg:flex flex-col gap-4 justify-start sticky top-8">
             <GameSelector isPlaying={processingStatus === 'processing'} />
+            <ParsingLogViewer sessionId={sessionId} isActive={processingStatus === 'processing'} />
           </div>
         )}
         

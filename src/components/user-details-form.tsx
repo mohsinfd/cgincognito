@@ -36,16 +36,35 @@ type Props = {
 export default function UserDetailsForm({ onSubmit, onCancel, loading = false, selectedStatements = [] }: Props) {
   const [name, setName] = useState('');
   const [dob, setDob] = useState('');
-  const [customerId, setCustomerId] = useState('');
   const [cards, setCards] = useState<CardDetails[]>([]);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
+  // Auto-fill from localStorage if available
+  useEffect(() => {
+    const userData = localStorage.getItem('cardgenius_user');
+    if (userData) {
+      try {
+        const parsed = JSON.parse(userData);
+        if (parsed.name) setName(parsed.name);
+        if (parsed.dob) setDob(parsed.dob);
+        console.log('✅ Auto-filled name and DOB from localStorage');
+      } catch (err) {
+        console.error('Failed to parse user data:', err);
+      }
+    }
+  }, []);
+
   // Initialize cards based on selected statements
+  // Only show cards for banks that actually require last4/last6
   const initializeCards = (): CardDetails[] => {
+    const banksNeedingCardInfo = ['hsbc', 'sbi']; // Only these banks need card digits
+    
     const uniqueBanks = new Map<string, { bankCode: string; bankName: string }>();
     
     selectedStatements.forEach(stmt => {
-      if (!uniqueBanks.has(stmt.bankCode)) {
+      const bankCodeLower = stmt.bankCode.toLowerCase();
+      // Only include banks that require card digits
+      if (banksNeedingCardInfo.includes(bankCodeLower) && !uniqueBanks.has(stmt.bankCode)) {
         uniqueBanks.set(stmt.bankCode, {
           bankCode: stmt.bankCode,
           bankName: stmt.bankName

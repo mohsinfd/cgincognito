@@ -11,10 +11,11 @@ import { mapBucket } from '@/lib/mapper/rules';
 import CardRecommendation from './card-recommendation';
 import OptimizationWarnings from './optimization-warnings';
 import UnsupportedCardNotice from './unsupported-card-notice';
+import GoodCardNotice from './good-card-notice';
 import { detectAllOptimizations, OptimizationWarning } from '@/lib/optimizer/category-optimizer';
 import { getPopularCardForBank, isBankSupported, UNSUPPORTED_BANKS, getBankName, getCardsForBank } from '@/lib/optimizer/card-registry';
 import { autoMatchCard, type CardMatchResult } from '@/lib/optimizer/card-matcher';
-import CardSelectionModal from './card-selection-modal';
+import CardSelectionModal, { type BankSelectionInfo } from './card-selection-modal';
 
 type Props = {
   statements: any[];
@@ -27,20 +28,22 @@ export default function OptimizerResults({ statements, selectedMonth }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [optimizationWarnings, setOptimizationWarnings] = useState<Record<string, OptimizationWarning[]>>({});
   const [unsupportedBanks, setUnsupportedBanks] = useState<string[]>([]);
-  const [cardMatches, setCardMatches] = useState<Record<string, CardMatchResult>>({});
+  const [cardMatches, setCardMatches] = useState<Record<string, CardMatchResult[]>>({});
   const [needsUserInput, setNeedsUserInput] = useState<Record<string, boolean>>({});
+  const [goodCards, setGoodCards] = useState<Record<string, { card: CGCardRecommendation; rank: number }>>({});
   const [cardSelectionModal, setCardSelectionModal] = useState<{
     isOpen: boolean;
-    bankCode: string;
-    bankName: string;
-  }>({ isOpen: false, bankCode: '', bankName: '' });
+    bankCode?: string;
+    bankName?: string;
+    bankQueue?: BankSelectionInfo[];
+  }>({ isOpen: false });
 
   // Function to process a manually selected card
   const processSelectedCard = async (bankCode: string, selectedCard: any) => {
     try {
       console.log(`🔍 Processing manually selected card for ${bankCode}: ${selectedCard.name}`);
       
-      // Build spend vector for this bank
+      // Build spend vector
       const spendVector = buildSpendVector(statements, selectedMonth);
       
       // Call API with selected_card_id
@@ -59,14 +62,19 @@ export default function OptimizerResults({ statements, selectedMonth }: Props) {
         throw new Error(`API call failed: ${userCardResponse.status}`);
       }
 
-      const userCards = await userCardResponse.json();
+      const userCardData = await userCardResponse.json();
+      const userCards = userCardData.savings || userCardData.cards || userCardData;
       
       if (!Array.isArray(userCards) || userCards.length === 0) {
         throw new Error('Invalid response from CardGenius API');
       }
 
-      // Process optimization warnings
-      const warnings = detectAllOptimizations(userCards, spendVector);
+      const currentCard = userCards[0];
+      const bestCard = userCards.length > 1 ? userCards[1] : currentCard;
+      
+      // Detect optimization warnings
+      const warnings = detectAllOptimizations(currentCard, bestCard);
+      
       setOptimizationWarnings(prev => ({
         ...prev,
         [bankCode]: warnings
@@ -133,7 +141,7 @@ export default function OptimizerResults({ statements, selectedMonth }: Props) {
         throw new Error('Invalid API response format - expected array of cards');
       }
       
-      const VALID_CARD_IDS = [8,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,29,30,31,32,33,34,35,36,39,40,41,43,44,45,46,47,49,50,51,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78];
+      const VALID_CARD_IDS = [8,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,29,30,31,32,33,34,35,36,39,40,41,43,44,45,46,47,49,50,51,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,80,81];
       const filteredCards = cardsArray.filter((card: any) => VALID_CARD_IDS.includes(card.id));
       
       console.log('🎯 General recommendations:', {
@@ -144,13 +152,14 @@ export default function OptimizerResults({ statements, selectedMonth }: Props) {
       
       setRecommendations(filteredCards);
       
-      // Step 5: For each supported bank, try to auto-match card
+      // Step 5: Collect banks needing card selection BEFORE processing
+      const banksNeedingSelection: BankSelectionInfo[] = [];
       const warningsByBank: Record<string, OptimizationWarning[]> = {};
-      const matches: Record<string, CardMatchResult> = {};
+      const matches: Record<string, CardMatchResult[]> = {}; // Changed to array to support multiple cards
       const needsInput: Record<string, boolean> = {};
       
+      // First pass: identify which banks need manual selection AND detect multiple cards
       for (const bankCode of supported) {
-        // Get statements for this bank
         const bankStatements = statements.filter(s => s.bankCode?.toLowerCase() === bankCode);
         
         if (bankStatements.length === 0) {
@@ -158,83 +167,134 @@ export default function OptimizerResults({ statements, selectedMonth }: Props) {
           continue;
         }
         
-        // Try auto-match from first statement
-        console.log(`🔍 Attempting auto-match for ${bankCode}...`);
-        const matchResult = autoMatchCard(bankStatements[0], 80); // 80% confidence threshold
+        // NEW: Match EACH statement to detect multiple cards
+        const statementMatches = new Map<string, CardMatchResult>();
         
-        let selectedCard;
-        
-        if (matchResult && matchResult.confidence >= 80) {
-          // Confident match found
-          console.log(`✅ Auto-matched ${bankCode} to ${matchResult.card.name} (${matchResult.confidence}% confidence)`);
-          selectedCard = matchResult.card;
-          matches[bankCode] = matchResult;
-          needsInput[bankCode] = false;
-        } else {
-          // Not confident or no match - show card selection modal
-          console.log(`⚠️ Low confidence match for ${bankCode} (${matchResult?.confidence || 0}%). Opening card selection modal.`);
+        for (const stmt of bankStatements) {
+          const matchResult = autoMatchCard(stmt, 80);
           
-          // Store the bank info for the modal
-          setCardSelectionModal({
-            isOpen: true,
-            bankCode,
-            bankName: getBankName(bankCode)
-          });
-          
-          // Skip this bank for now - will be processed after user selects card
-          continue;
+          if (matchResult && matchResult.confidence >= 80) {
+            // Use card name as key to detect multiple cards
+            const cardKey = matchResult.card.name;
+            if (!statementMatches.has(cardKey)) {
+              statementMatches.set(cardKey, matchResult);
+            }
+          }
         }
         
-        console.log(`🔍 Analyzing ${bankCode} with card ID ${selectedCard.id} (${selectedCard.name})...`);
+        const uniqueMatches = Array.from(statementMatches.values());
         
-        try {
-          // Call API with selected_card_id
-          const userCardResponse = await fetch('https://card-recommendation-api-v2.bankkaro.com/cg/api/beta', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              ...spendVector,
-              selected_card_id: selectedCard.id,
-            }),
+        if (uniqueMatches.length === 0) {
+          // No confident matches - need user input
+          banksNeedingSelection.push({
+            bankCode,
+            bankName: getBankName(bankCode),
+            availableCards: getCardsForBank(bankCode),
+            mostLikelyCard: null,
+            confidence: 0
           });
+          needsInput[bankCode] = true;
+        } else if (uniqueMatches.length === 1) {
+          // Single card detected - proceed normally
+          matches[bankCode] = uniqueMatches;
+          needsInput[bankCode] = false;
+        } else {
+          // MULTIPLE CARDS DETECTED - special handling
+          console.log(`🎯 ${bankCode} has ${uniqueMatches.length} cards:`, uniqueMatches.map(m => m.card.name));
+          matches[bankCode] = uniqueMatches;
+          needsInput[bankCode] = false;
+          // We'll process each card separately
+        }
+      }
+      
+      // If banks need selection, open modal with full queue
+      if (banksNeedingSelection.length > 0) {
+        console.log(`📋 Opening card selection modal for ${banksNeedingSelection.length} banks`);
+        setCardSelectionModal({
+          isOpen: true,
+          bankQueue: banksNeedingSelection
+        });
+        setCardMatches(matches);
+        setNeedsUserInput(needsInput);
+        setLoading(false);
+        return; // User will continue flow after card selection
+      }
+      
+      // Second pass: process all banks with confident matches (handle multiple cards)
+      for (const bankCode of supported) {
+        const matchResults = matches[bankCode];
+        if (!matchResults || matchResults.length === 0) continue; // Skip banks needing manual selection
+        
+        // Process EACH card for this bank
+        for (const matchResult of matchResults) {
+          const selectedCard = matchResult.card;
           
-          if (!userCardResponse.ok) {
-            console.error(`Failed to get analysis for ${bankCode}`);
-            continue;
+          // Create unique key for this bank+card combination
+          const cardKey = `${bankCode}_${selectedCard.id}`;
+          
+          console.log(`🔍 Analyzing ${bankCode} card: ${selectedCard.name} (ID: ${selectedCard.id})...`);
+          
+          try {
+            const userCardResponse = await fetch('https://card-recommendation-api-v2.bankkaro.com/cg/api/beta', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                ...spendVector,
+                selected_card_id: selectedCard.id,
+              }),
+            });
+            
+            if (!userCardResponse.ok) {
+              console.error(`Failed to get analysis for ${bankCode} card ${selectedCard.name}`);
+              continue;
+            }
+            
+            const userCardData = await userCardResponse.json();
+            const userCards = userCardData.savings || userCardData.cards || userCardData;
+            
+            if (!Array.isArray(userCards) || userCards.length === 0) {
+              console.error(`Invalid response for ${bankCode} card ${selectedCard.name}:`, userCardData);
+              continue;
+            }
+            
+            const currentCard = userCards[0];
+            const bestCard = userCards.length > 1 ? userCards[1] : currentCard;
+            
+            console.log(`💡 ${bankCode} ${selectedCard.name} analysis:`, {
+              currentCard: currentCard.card_name,
+              currentSavings: currentCard.total_savings,
+              bestCard: bestCard.card_name,
+              bestSavings: bestCard.total_savings,
+            });
+            
+            const warnings = detectAllOptimizations(currentCard, bestCard);
+            
+            // Check if user's card is ranked #1 or #2 (already optimal)
+            if (userCards.length > 0) {
+              const userCardRank = userCards.findIndex(c => c.id === currentCard.id) + 1;
+              const isOptimal = userCardRank <= 2;
+              
+              if (isOptimal) {
+                console.log(`✅ ${bankCode} ${selectedCard.name} is optimal (ranked #${userCardRank})`);
+                setGoodCards(prev => ({
+                  ...prev,
+                  [cardKey]: {
+                    card: currentCard,
+                    rank: userCardRank
+                  }
+                }));
+              }
+            }
+            
+            if (warnings.length > 0) {
+              warningsByBank[cardKey] = warnings;
+              console.log(`⚠️ Found ${warnings.length} optimization warnings for ${bankCode} ${selectedCard.name}`);
+            }
+          } catch (err) {
+            console.error(`Error analyzing ${bankCode} card ${selectedCard.name}:`, err);
           }
-          
-               const userCardData = await userCardResponse.json();
-               const userCards = userCardData.savings || userCardData.cards || userCardData;
-               
-               if (!Array.isArray(userCards) || userCards.length === 0) {
-                 console.error(`Invalid response for ${bankCode}:`, userCardData);
-                 continue;
-               }
-               
-               // userCards[0] = user's current card
-               const currentCard = userCards[0];
-               
-               // If only 1 card returned, user already has the best card for their spend!
-               const bestCard = userCards.length > 1 ? userCards[1] : currentCard;
-          
-          console.log(`💡 ${bankCode} analysis:`, {
-            currentCard: currentCard.card_name,
-            currentSavings: currentCard.total_savings,
-            bestCard: bestCard.card_name,
-            bestSavings: bestCard.total_savings,
-          });
-          
-          // Detect optimization opportunities
-          const warnings = detectAllOptimizations(currentCard, bestCard);
-          
-          if (warnings.length > 0) {
-            warningsByBank[bankCode] = warnings;
-            console.log(`⚠️ Found ${warnings.length} optimization warnings for ${bankCode}`);
-          }
-        } catch (err) {
-          console.error(`Error analyzing ${bankCode}:`, err);
         }
       }
       
@@ -381,14 +441,31 @@ export default function OptimizerResults({ statements, selectedMonth }: Props) {
       {/* Unsupported Banks Notice */}
       {unsupportedBanks.length > 0 && <UnsupportedCardNotice unsupportedBanks={unsupportedBanks} />}
       
+      {/* Good Cards - Cards That Are Already Optimal */}
+      {Object.entries(goodCards).map(([bankCode, data]) => (
+        <GoodCardNotice
+          key={bankCode}
+          cardName={data.card.card_name}
+          bankName={getBankName(bankCode)}
+          totalSavings={data.card.total_savings}
+          rank={data.rank}
+          annualSavings={data.card.total_savings_yearly}
+        />
+      ))}
+
       {/* Optimization Warnings (Category Mismatches + Cap Hits) */}
-      {Object.entries(optimizationWarnings).map(([bankCode, warnings]) => {
-        const matchResult = cardMatches[bankCode];
+      {Object.entries(optimizationWarnings).map(([cardKey, warnings]) => {
+        // Parse cardKey to extract bankCode and cardId
+        const [bankCode, cardId] = cardKey.split('_');
+        const matchResults = cardMatches[bankCode];
         const needsConfirmation = needsUserInput[bankCode];
+        
+        // Find the specific card match
+        const matchResult = matchResults?.find(m => m.card.id.toString() === cardId);
         const cardName = matchResult?.card.name || getBankName(bankCode);
         
         return (
-          <div key={bankCode}>
+          <div key={cardKey}>
             {/* Show card match confidence if available */}
             {matchResult && matchResult.confidence < 100 && (
               <div className="bg-blue-50 border-l-4 border-blue-400 p-4 rounded-lg mb-4">
@@ -495,29 +572,96 @@ export default function OptimizerResults({ statements, selectedMonth }: Props) {
       {/* Card Selection Modal */}
       <CardSelectionModal
         isOpen={cardSelectionModal.isOpen}
+        bankQueue={cardSelectionModal.bankQueue}
         bankCode={cardSelectionModal.bankCode}
         bankName={cardSelectionModal.bankName}
-        availableCards={getCardsForBank(cardSelectionModal.bankCode)}
-        onCardSelected={(card) => {
-          console.log(`✅ User selected card: ${card.name} for ${cardSelectionModal.bankCode}`);
-          // Process the selected card
-          processSelectedCard(cardSelectionModal.bankCode, card);
-          setCardSelectionModal({ isOpen: false, bankCode: '', bankName: '' });
+        availableCards={cardSelectionModal.bankCode ? getCardsForBank(cardSelectionModal.bankCode) : []}
+        onCardSelected={(bankCode, card) => {
+          console.log(`✅ User selected card: ${card.name} for ${bankCode}`);
+          // Store selection but don't call API yet
+          setCardMatches(prev => ({
+            ...prev,
+            [bankCode]: {
+              card,
+              confidence: 100,
+              method: 'manual'
+            }
+          }));
         }}
-        onManualEntry={(cardName) => {
-          console.log(`✅ User entered manual card: ${cardName} for ${cardSelectionModal.bankCode}`);
-          // Create a manual card entry
+        onManualEntry={(bankCode, cardName) => {
+          console.log(`✅ User entered manual card: ${cardName} for ${bankCode}`);
           const manualCard = {
-            id: 999, // Temporary ID for manual entries
+            id: 999,
             name: cardName,
-            bankId: getCardsForBank(cardSelectionModal.bankCode)[0]?.bankId || 0,
-            bankName: cardSelectionModal.bankName
+            bankId: getCardsForBank(bankCode)[0]?.bankId || 0,
+            bankName: getBankName(bankCode)
           };
-          processSelectedCard(cardSelectionModal.bankCode, manualCard);
-          setCardSelectionModal({ isOpen: false, bankCode: '', bankName: '' });
+          // Store selection but don't call API yet
+          setCardMatches(prev => ({
+            ...prev,
+            [bankCode]: {
+              card: manualCard,
+              confidence: 100,
+              method: 'manual'
+            }
+          }));
         }}
-        onClose={() => {
-          setCardSelectionModal({ isOpen: false, bankCode: '', bankName: '' });
+        onClose={async () => {
+          console.log('🔄 Card selection completed. Processing all banks...');
+          setCardSelectionModal({ isOpen: false });
+          
+          // Now process all selected cards with API calls
+          const selectedCards = Object.entries(cardMatches);
+          const warningsByBank: Record<string, OptimizationWarning[]> = {};
+          
+          for (const [bankCode, matchResult] of selectedCards) {
+            if (!matchResult) continue;
+            
+            const selectedCard = matchResult.card;
+            console.log(`🔍 Analyzing ${bankCode} with card ID ${selectedCard.id} (${selectedCard.name})...`);
+            
+            try {
+              const spendVector = buildSpendVector(statements, selectedMonth);
+              
+              const userCardResponse = await fetch('https://card-recommendation-api-v2.bankkaro.com/cg/api/beta', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  ...spendVector,
+                  selected_card_id: selectedCard.id,
+                }),
+              });
+              
+              if (!userCardResponse.ok) {
+                console.error(`Failed to get analysis for ${bankCode}`);
+                continue;
+              }
+              
+              const userCardData = await userCardResponse.json();
+              const userCards = userCardData.savings || userCardData.cards || userCardData;
+              
+              if (!Array.isArray(userCards) || userCards.length === 0) {
+                console.error(`Invalid response for ${bankCode}:`, userCardData);
+                continue;
+              }
+              
+              const currentCard = userCards[0];
+              const bestCard = userCards.length > 1 ? userCards[1] : currentCard;
+              
+              const warnings = detectAllOptimizations(currentCard, bestCard);
+              
+              if (warnings.length > 0) {
+                warningsByBank[bankCode] = warnings;
+                console.log(`⚠️ Found ${warnings.length} optimization warnings for ${bankCode}`);
+              }
+            } catch (err) {
+              console.error(`Error analyzing ${bankCode}:`, err);
+            }
+          }
+          
+          setOptimizationWarnings(warningsByBank);
         }}
       />
     </div>

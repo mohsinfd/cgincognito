@@ -285,9 +285,25 @@ export function mapTransactionCategory(
     return 'upi_transactions';
   }
   
-  // DREAMPLUG TECHNOLOGIES = CRED (rent, maintenance, education, school fees)
-  if (desc.includes('dreamplug') || desc.includes('cred')) {
+  // CRED RENTAL = actual rent payment (only if explicitly mentioned)
+  if (desc.includes('cred') && desc.includes('rent')) {
     return 'rent';
+  }
+  
+  // CRED payments (check amount - rent is usually ₹80k-₹95k)
+  if (desc.includes('cred')) {
+    if (amount >= 80000 && amount <= 95000) {
+      return 'rent'; // Likely rent payment based on amount
+    }
+    return 'other_online_spends'; // Other CRED payments
+  }
+  
+  // DREAMPLUG TECHNOLOGIES = various payments
+  if (desc.includes('dreamplug')) {
+    if (amount >= 80000 && amount <= 95000) {
+      return 'rent'; // Likely rent payment based on amount
+    }
+    return 'other_online_spends'; // Maintenance, fees, etc.
   }
   
   // PhonePe utility payments

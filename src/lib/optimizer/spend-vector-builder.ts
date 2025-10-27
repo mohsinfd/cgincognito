@@ -18,17 +18,16 @@ type Transaction = {
 /**
  * Build complete spend vector from transactions
  * @param transactions Array of transactions (can be from multiple statements)
- * @param monthsOfData How many months of data (default 1)
+ * @param monthsOfData How many months of data (default 1) - DEPRECATED, now auto-calculated
  */
 export function buildCompleteSpendVector(
   transactions: Transaction[],
-  monthsOfData: number = 1
+  monthsOfData: number = 1 // Keep parameter for backward compatibility, but ignore it
 ): CGSpendVectorComplete {
   const vector = createEmptySpendVector();
   
-  // Temporary buckets for categorization
-  const monthlySpend: Record<string, number> = {};
-  const annualSpend: Record<string, number> = {};
+  // Group by category AND month to count actual months with data
+  const categoryMonthMap: Record<string, Record<string, number>> = {};
 
   // Process each transaction
   transactions.forEach(txn => {
@@ -45,31 +44,44 @@ export function buildCompleteSpendVector(
       txn.amount
     );
 
+    // Extract month from date (YYYY-MM format)
+    const month = txn.date.substring(0, 7); // "2025-10-15" → "2025-10"
+
     const amount = txn.type === 'Dr' ? txn.amount : -txn.amount;
 
-    // Add to appropriate bucket
-    if (isAnnualCategory(category)) {
-      annualSpend[category] = (annualSpend[category] || 0) + amount;
-    } else {
-      monthlySpend[category] = (monthlySpend[category] || 0) + amount;
+    // Initialize category map if needed
+    if (!categoryMonthMap[category]) {
+      categoryMonthMap[category] = {};
     }
+
+    // Initialize month total if needed
+    if (!categoryMonthMap[category][month]) {
+      categoryMonthMap[category][month] = 0;
+    }
+
+    // Add to category-month bucket
+    categoryMonthMap[category][month] += amount;
   });
 
-  // Convert monthly spend to monthly averages
-  Object.entries(monthlySpend).forEach(([category, total]) => {
-    const monthlyAverage = total / monthsOfData;
-    const apiKey = getCGApiKey(category as any);
-    (vector as any)[apiKey] = Math.max(0, Math.round(monthlyAverage));
-  });
+  // Calculate averages for each category
+  Object.entries(categoryMonthMap).forEach(([category, monthData]) => {
+    // Count unique months with data for this category
+    const monthsWithData = Object.keys(monthData).length;
+    
+    // Sum all monthly totals
+    const total = Object.values(monthData).reduce((sum, amt) => sum + amt, 0);
+    
+    // Calculate monthly average (only for months with data)
+    const monthlyAverage = total / monthsWithData;
 
-  // Convert annual spend: extrapolate from available data
-  Object.entries(annualSpend).forEach(([category, total]) => {
-    // If we have 1 month of data, multiply by 12 for annual estimate
-    // If we have 3 months, multiply by 4, etc.
-    const multiplier = 12 / monthsOfData;
-    const annualEstimate = total * multiplier;
     const apiKey = getCGApiKey(category as any);
-    (vector as any)[apiKey] = Math.max(0, Math.round(annualEstimate));
+    
+    // For annual categories, multiply monthly average by 12
+    if (isAnnualCategory(category)) {
+      (vector as any)[apiKey] = Math.max(0, Math.round(monthlyAverage * 12));
+    } else {
+      (vector as any)[apiKey] = Math.max(0, Math.round(monthlyAverage));
+    }
   });
 
   return vector;
@@ -80,20 +92,25 @@ export function buildCompleteSpendVector(
  */
 export function buildSpendVectorWithBreakdown(
   transactions: Transaction[],
-  monthsOfData: number = 1
+  monthsOfData: number = 1 // DEPRECATED, now auto-calculated
 ): {
   vector: CGSpendVectorComplete;
   breakdown: {
     category: string;
     monthlyAvg: number;
+    monthsWithData: number;
     transactionCount: number;
     apiKey: string;
   }[];
 } {
   const vector = buildCompleteSpendVector(transactions, monthsOfData);
   
-  // Build breakdown
-  const categoryTotals: Record<string, { total: number; count: number }> = {};
+  // Build breakdown with month tracking
+  const categoryData: Record<string, { 
+    months: Set<string>; 
+    total: number; 
+    count: number 
+  }> = {};
   
   transactions.forEach(txn => {
     if (txn.type === 'Cr') return;
@@ -105,17 +122,21 @@ export function buildSpendVectorWithBreakdown(
       txn.amount
     );
     
-    if (!categoryTotals[category]) {
-      categoryTotals[category] = { total: 0, count: 0 };
+    const month = txn.date.substring(0, 7);
+    
+    if (!categoryData[category]) {
+      categoryData[category] = { months: new Set(), total: 0, count: 0 };
     }
     
-    categoryTotals[category].total += txn.amount;
-    categoryTotals[category].count += 1;
+    categoryData[category].months.add(month);
+    categoryData[category].total += txn.amount;
+    categoryData[category].count += 1;
   });
 
-  const breakdown = Object.entries(categoryTotals).map(([category, data]) => ({
+  const breakdown = Object.entries(categoryData).map(([category, data]) => ({
     category,
-    monthlyAvg: Math.round(data.total / monthsOfData),
+    monthlyAvg: Math.round(data.total / data.months.size),
+    monthsWithData: data.months.size,
     transactionCount: data.count,
     apiKey: getCGApiKey(category as any),
   }));

@@ -169,13 +169,22 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Deduplicate statements by message_id (Gmail message ID)
+    const uniqueStatements = Array.from(
+      new Map(processedBanks.map(s => [s.message_id, s])).values()
+    );
+    
+    if (uniqueStatements.length < processedBanks.length) {
+      console.log(`📊 Deduplication: ${processedBanks.length} total → ${uniqueStatements.length} unique (removed ${processedBanks.length - uniqueStatements.length} duplicates)`);
+    }
+
     return NextResponse.json({
       success: true,
       user_id: userId,
       sync_time: new Date().toISOString(),
-      banks_found: processedBanks.length,
-      total_statements: totalStatements,
-      banks: processedBanks,
+      banks_found: uniqueStatements.length,
+      total_statements: uniqueStatements.length,
+      banks: uniqueStatements,
       note: processStatements 
         ? 'Statements downloaded and parsed with LLM'
         : 'Statement metadata only - use processStatements=true to parse',

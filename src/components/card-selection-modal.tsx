@@ -1,10 +1,9 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import CardSelection from './card-selection';
 
-interface CardSelectionModalProps {
-  isOpen: boolean;
+export interface BankSelectionInfo {
   bankCode: string;
   bankName: string;
   availableCards: Array<{
@@ -13,21 +12,80 @@ interface CardSelectionModalProps {
     bankId: number;
     bankName: string;
   }>;
-  onCardSelected: (card: any) => void;
-  onManualEntry: (cardName: string) => void;
+  mostLikelyCard?: {
+    id: number;
+    name: string;
+    bankId: number;
+    bankName: string;
+  } | null;
+  confidence?: number;
+}
+
+interface CardSelectionModalProps {
+  isOpen: boolean;
+  bankQueue?: BankSelectionInfo[]; // Array of banks needing selection
+  bankCode?: string; // Fallback for single bank (legacy)
+  bankName?: string;
+  availableCards?: Array<{
+    id: number;
+    name: string;
+    bankId: number;
+    bankName: string;
+  }>;
+  onCardSelected: (bankCode: string, card: any) => void;
+  onManualEntry: (bankCode: string, cardName: string) => void;
   onClose: () => void;
 }
 
 export default function CardSelectionModal({
   isOpen,
+  bankQueue = [],
   bankCode,
   bankName,
-  availableCards,
+  availableCards = [],
   onCardSelected,
   onManualEntry,
   onClose
 }: CardSelectionModalProps) {
+  const [currentIndex, setCurrentIndex] = useState(0);
+
+  // Reset to first bank when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      setCurrentIndex(0);
+    }
+  }, [isOpen]);
+
   if (!isOpen) return null;
+
+  // Use queue if available, otherwise fallback to single bank
+  const currentBank = bankQueue.length > 0 ? bankQueue[currentIndex] : {
+    bankCode: bankCode || '',
+    bankName: bankName || '',
+    availableCards
+  };
+
+  const isLastBank = bankQueue.length === 0 || currentIndex === bankQueue.length - 1;
+
+  const handleCardSelected = (card: any) => {
+    onCardSelected(currentBank.bankCode, card);
+    
+    if (!isLastBank && bankQueue.length > 0) {
+      setCurrentIndex(prev => prev + 1);
+    } else {
+      onClose();
+    }
+  };
+
+  const handleManualEntry = (cardName: string) => {
+    onManualEntry(currentBank.bankCode, cardName);
+    
+    if (!isLastBank && bankQueue.length > 0) {
+      setCurrentIndex(prev => prev + 1);
+    } else {
+      onClose();
+    }
+  };
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -40,19 +98,46 @@ export default function CardSelectionModal({
           ×
         </button>
         
+        {/* Progress indicator */}
+        {bankQueue.length > 0 && (
+          <div className="absolute -top-10 left-0 right-0 text-center text-white text-sm">
+            Bank {currentIndex + 1} of {bankQueue.length}
+          </div>
+        )}
+        
+        {/* Most likely card badge */}
+        {currentBank.mostLikelyCard && currentBank.confidence && (
+          <div className="absolute -top-16 left-0 right-0 text-center">
+            <div className="inline-block bg-green-500 text-white text-xs px-3 py-1 rounded-full">
+              Best Match: {currentBank.mostLikelyCard.name} ({currentBank.confidence}% confidence)
+            </div>
+          </div>
+        )}
+        
         <CardSelection
-          bankCode={bankCode}
-          bankName={bankName}
-          availableCards={availableCards}
-          onCardSelected={(card) => {
-            onCardSelected(card);
-            onClose();
-          }}
-          onManualEntry={(cardName) => {
-            onManualEntry(cardName);
-            onClose();
-          }}
+          bankCode={currentBank.bankCode}
+          bankName={currentBank.bankName}
+          availableCards={currentBank.availableCards}
+          mostLikelyCard={currentBank.mostLikelyCard}
+          onCardSelected={handleCardSelected}
+          onManualEntry={handleManualEntry}
         />
+        
+        {/* Navigation indicator */}
+        {bankQueue.length > 0 && (
+          <div className="absolute -bottom-8 left-0 right-0 flex justify-center gap-2">
+            {bankQueue.map((_, index) => (
+              <div
+                key={index}
+                className={`w-2 h-2 rounded-full ${
+                  index === currentIndex ? 'bg-blue-600' : 
+                  index < currentIndex ? 'bg-green-600' : 
+                  'bg-gray-400'
+                }`}
+              />
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
