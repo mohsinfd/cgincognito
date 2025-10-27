@@ -42,7 +42,7 @@ export default function HomePage() {
               Connect your Gmail to automatically fetch credit card statements from 12+ major Indian issuers. Background polling every 15 minutes keeps your data fresh.
             </p>
             <Link
-              href="/connect"
+              href="/gmail-test"
               className="inline-block bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition"
             >
               Connect Gmail →
