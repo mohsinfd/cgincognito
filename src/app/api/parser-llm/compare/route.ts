@@ -5,10 +5,10 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createLLMParser } from '@/lib/parser-llm';
-import { boostScoreClient } from '@/lib/boostscore/client';
 import type { BoostScoreUploadPayload } from '@/types/boostscore';
 
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 export const maxDuration = 90; // 90 seconds for both parsers
 
 export async function POST(request: NextRequest) {
@@ -51,6 +51,7 @@ export async function POST(request: NextRequest) {
 
       // BoostScore
       (async () => {
+        const { boostScoreClient } = await import('@/lib/boostscore/client');
         const uploadResponse = await boostScoreClient.uploadStatement(
           new Blob([buffer]),
           payload
