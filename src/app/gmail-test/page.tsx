@@ -63,8 +63,12 @@ export default function GmailTestPage() {
             const finalEmail = data.email;
             setUserEmail(finalEmail);
             
-            // User connected - no signup form needed yet
-            // We'll collect details when processing statements that need them
+            // Store minimal user record (just email for now)
+            // Details will be collected when processing statements that need them
+            localStorage.setItem('cardgenius_user', JSON.stringify({ 
+              email: finalEmail,
+              createdAt: new Date().toISOString()
+            }));
           } else {
             setUserEmail('Connected (email unknown)');
           }
@@ -75,8 +79,12 @@ export default function GmailTestPage() {
       } else {
         setUserEmail(userEmailValue);
         
-        // User connected - no signup form needed yet
-        // We'll collect details when processing statements that need them
+        // Store minimal user record (just email for now)
+        // Details will be collected when processing statements that need them
+        localStorage.setItem('cardgenius_user', JSON.stringify({ 
+          email: userEmailValue,
+          createdAt: new Date().toISOString()
+        }));
       }
       
       // Clean URL
@@ -535,27 +543,6 @@ ${result.error ? `Error: ${result.error}` : ''}
 
   return (
     <div className="min-h-screen bg-gray-50 p-8">
-      {/* Show signup prompt if connected but no user data */}
-      {status === 'connected' && !localStorage.getItem('cardgenius_user') && userEmail && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg p-8 max-w-md text-center">
-            <h2 className="text-2xl font-bold mb-4">Ready to Process Statements</h2>
-            <p className="text-gray-600 mb-6">
-              Your information will be collected only when we find statements that need it (for banks like SBI, HSBC, etc.)
-            </p>
-            <button
-              onClick={() => {
-                // Close modal and allow user to proceed
-                localStorage.setItem('cardgenius_user', JSON.stringify({ email: userEmail }));
-              }}
-              className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700"
-            >
-              Continue
-            </button>
-          </div>
-        </div>
-      )}
-      
       <div className={processingStatus === 'processing' ? "max-w-7xl mx-auto" : "max-w-2xl mx-auto"}>
         <div className={processingStatus === 'processing' ? "grid grid-cols-1 lg:grid-cols-2 gap-8" : ""}>
           <div>
