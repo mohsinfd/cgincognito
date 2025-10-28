@@ -91,9 +91,15 @@ export default function OptimizerResults({ statements, selectedMonth }: Props) {
     if (statements.length === 0) return;
     
     runOptimizer();
-  }, [statements, selectedMonth]);
+  }, [statements, selectedMonth]); // Note: runOptimizer uses cardMatches and optimizationWarnings from state
 
   const runOptimizer = async () => {
+    // If we already have card matches and warnings, don't run again
+    if (Object.keys(cardMatches).length > 0 && Object.keys(optimizationWarnings).length > 0) {
+      console.log('✅ Skipping optimizer - using existing results');
+      return;
+    }
+    
     setLoading(true);
     setError(null);
 
@@ -614,54 +620,60 @@ export default function OptimizerResults({ statements, selectedMonth }: Props) {
           const selectedCards = Object.entries(cardMatches);
           const warningsByBank: Record<string, OptimizationWarning[]> = {};
           
-          for (const [bankCode, matchResult] of selectedCards) {
-            if (!matchResult) continue;
+          for (const [bankCode, matchResults] of selectedCards) {
+            // matchResults is an ARRAY of CardMatchResult (multiple cards per bank)
+            if (!matchResults || matchResults.length === 0) continue;
             
-            const selectedCard = matchResult.card;
-            console.log(`🔍 Analyzing ${bankCode} with card ID ${selectedCard.id} (${selectedCard.name})...`);
-            
-            try {
-              const spendVector = buildSpendVector(statements, selectedMonth);
+            // Process EACH card for this bank
+            for (const matchResult of matchResults) {
+              const selectedCard = matchResult.card;
+              const cardKey = `${bankCode}_${selectedCard.id}`;
               
-              const userCardResponse = await fetch('https://card-recommendation-api-v2.bankkaro.com/cg/api/beta', {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                  ...spendVector,
-                  selected_card_id: selectedCard.id,
-                }),
-              });
+              console.log(`🔍 Analyzing ${bankCode} with card ID ${selectedCard.id} (${selectedCard.name})...`);
               
-              if (!userCardResponse.ok) {
-                console.error(`Failed to get analysis for ${bankCode}`);
-                continue;
+              try {
+                const spendVector = buildSpendVector(statements, selectedMonth);
+                
+                const userCardResponse = await fetch('https://card-recommendation-api-v2.bankkaro.com/cg/api/beta', {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify({
+                    ...spendVector,
+                    selected_card_id: selectedCard.id,
+                  }),
+                });
+                
+                if (!userCardResponse.ok) {
+                  console.error(`Failed to get analysis for ${bankCode} card ${selectedCard.name}`);
+                  continue;
+                }
+                
+                const userCardData = await userCardResponse.json();
+                const userCards = userCardData.savings || userCardData.cards || userCardData;
+                
+                if (!Array.isArray(userCards) || userCards.length === 0) {
+                  console.error(`Invalid response for ${bankCode} card ${selectedCard.name}:`, userCardData);
+                  continue;
+                }
+                
+                const currentCard = userCards[0];
+                const bestCard = userCards.length > 1 ? userCards[1] : currentCard;
+                
+                const warnings = detectAllOptimizations(currentCard, bestCard);
+                
+                if (warnings.length > 0) {
+                  warningsByBank[cardKey] = warnings;
+                  console.log(`⚠️ Found ${warnings.length} optimization warnings for ${bankCode} card ${selectedCard.name}`);
+                }
+              } catch (err) {
+                console.error(`Error analyzing ${bankCode} card ${selectedCard.name}:`, err);
               }
-              
-              const userCardData = await userCardResponse.json();
-              const userCards = userCardData.savings || userCardData.cards || userCardData;
-              
-              if (!Array.isArray(userCards) || userCards.length === 0) {
-                console.error(`Invalid response for ${bankCode}:`, userCardData);
-                continue;
-              }
-              
-              const currentCard = userCards[0];
-              const bestCard = userCards.length > 1 ? userCards[1] : currentCard;
-              
-              const warnings = detectAllOptimizations(currentCard, bestCard);
-              
-              if (warnings.length > 0) {
-                warningsByBank[bankCode] = warnings;
-                console.log(`⚠️ Found ${warnings.length} optimization warnings for ${bankCode}`);
-              }
-            } catch (err) {
-              console.error(`Error analyzing ${bankCode}:`, err);
             }
           }
           
-          setOptimizationWarnings(warningsByBank);
+          setOptimizationWarnings(prev => ({ ...prev, ...warningsByBank }));
         }}
       />
     </div>
