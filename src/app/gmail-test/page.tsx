@@ -777,32 +777,6 @@ GOOGLE_REDIRECT_URI=http://localhost:3000/api/oauth2/callback`}
           </div>
         )}
         
-        {/* Success notification when parsing completes */}
-        {processingStatus === 'completed' && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-lg p-8 max-w-md text-center shadow-2xl">
-              <div className="text-6xl mb-4">🎉</div>
-              <h2 className="text-2xl font-bold mb-2">Statements Parsed!</h2>
-              <p className="text-gray-600 mb-6">
-                All your credit card statements have been successfully processed.
-              </p>
-              <div className="flex gap-4 justify-center">
-                <a
-                  href="/dashboard"
-                  className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 font-medium"
-                >
-                  📊 View Dashboard
-                </a>
-                <button
-                  onClick={() => setProcessingStatus('idle')}
-                  className="bg-gray-200 text-gray-700 px-6 py-3 rounded-lg hover:bg-gray-300 font-medium"
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
 
       </div>
     </div>
