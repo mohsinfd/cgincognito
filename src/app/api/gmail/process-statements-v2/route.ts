@@ -181,6 +181,27 @@ const BANK_PASSWORD_RULES = {
       
       return attempts;
     }
+  },
+  'jupiter': {
+    requiredFields: ['name', 'dob'],
+    generatePasswords: (userDetails: any, _bankCode: string) => {
+      const attempts = [];
+      const name = userDetails.name || '';
+      const dob = userDetails.dob || '';
+      
+      if (name.length >= 4 && dob.length >= 8) {
+        const name4 = name.replace(/[^a-zA-Z]/g, '').substring(0, 4).toUpperCase();
+        const ddmm = dob.substring(0, 4); // DDMM
+        attempts.push({ password: name4 + ddmm, source: 'jupiter-name4+ddmm' });
+        
+        // Also try full DOB
+        if (dob.length === 8) {
+          attempts.push({ password: dob, source: 'jupiter-dob-full' });
+        }
+      }
+      
+      return attempts;
+    }
   }
 };
 
@@ -193,7 +214,22 @@ function tryQpdfDecryption(pdfBuffer: Buffer, password: string): { success: bool
     }
     
     const decryptedPath = join(tempDir, `v2-decrypted-${Date.now()}.pdf`);
-    const qpdfPath = 'C:\\Program Files (x86)\\qpdf 12.2.0\\bin\\qpdf.exe';
+    
+    // Use 'qpdf' from PATH on Linux/Railway, or Windows path if available
+    let qpdfPath = 'qpdf';
+    const windowsPaths = [
+      'C:\\Program Files (x86)\\qpdf 12.2.0\\bin\\qpdf.exe',
+      'C:\\Program Files\\qpdf\\bin\\qpdf.exe',
+      'C:\\qpdf\\bin\\qpdf.exe',
+    ];
+    
+    // Check for Windows-specific paths
+    for (const path of windowsPaths) {
+      if (existsSync(path)) {
+        qpdfPath = path;
+        break;
+      }
+    }
     
     // Write PDF buffer to temporary file
     const tempInputPath = join(tempDir, `temp-input-${Date.now()}.pdf`);
