@@ -11,4 +11,5 @@ yarn-error.log
 temp-decrypted
 *.pdf
 fixtures/*.pdf
+src/app/api/parser-llm/compare
 
