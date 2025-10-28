@@ -10,7 +10,6 @@ import StatementVerification, { type FoundStatement } from '@/components/stateme
 import RealTimeProcessingStatus from '@/components/real-time-processing-status';
 import NonSupportedBanks from '@/components/non-supported-banks';
 import GameSelector from '@/components/game-selector';
-import SignupForm, { type SignupData } from '@/components/signup-form';
 import ParsingLogViewer from '@/components/parsing-log-viewer';
 import { saveStatement } from '@/lib/storage/browser-storage';
 
@@ -19,8 +18,6 @@ export default function GmailTestPage() {
   const [status, setStatus] = useState<'disconnected' | 'connecting' | 'connected'>('disconnected');
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [showSignup, setShowSignup] = useState(false);
-  const [signupLoading, setSignupLoading] = useState(false);
   const [foundStatements, setFoundStatements] = useState<FoundStatement[]>([]);
   const [showVerification, setShowVerification] = useState(false);
   const [syncLoading, setSyncLoading] = useState(false);
@@ -66,12 +63,8 @@ export default function GmailTestPage() {
             const finalEmail = data.email;
             setUserEmail(finalEmail);
             
-            // Check if user has already signed up
-            const existingUser = localStorage.getItem('cardgenius_user');
-            if (!existingUser && finalEmail) {
-              // First time user - show signup form
-              setShowSignup(true);
-            }
+            // User connected - no signup form needed yet
+            // We'll collect details when processing statements that need them
           } else {
             setUserEmail('Connected (email unknown)');
           }
@@ -82,12 +75,8 @@ export default function GmailTestPage() {
       } else {
         setUserEmail(userEmailValue);
         
-        // Check if user has already signed up
-        const existingUser = localStorage.getItem('cardgenius_user');
-        if (!existingUser && userEmailValue) {
-          // First time user - show signup form
-          setShowSignup(true);
-        }
+        // User connected - no signup form needed yet
+        // We'll collect details when processing statements that need them
       }
       
       // Clean URL
@@ -120,38 +109,6 @@ export default function GmailTestPage() {
       console.error('Failed to connect Gmail:', err);
       setError(err.message || 'Failed to connect Gmail');
       setConnecting(false);
-    }
-  };
-
-  const handleSignup = async (signupData: SignupData) => {
-    setSignupLoading(true);
-    
-    try {
-      // Store user info in localStorage
-      const userData = {
-        email: userEmail,
-        name: signupData.name,
-        dob: signupData.dob,
-        createdAt: new Date().toISOString()
-      };
-      
-      localStorage.setItem('cardgenius_user', JSON.stringify(userData));
-      
-      console.log('✅ User signup completed:', userData);
-      
-      // Hide signup form and proceed to sync
-      setShowSignup(false);
-      
-      // Automatically start sync after signup
-      setTimeout(() => {
-        testSync();
-      }, 500);
-      
-    } catch (err: any) {
-      console.error('Signup error:', err);
-      setError(err.message || 'Failed to complete signup');
-    } finally {
-      setSignupLoading(false);
     }
   };
 
@@ -218,6 +175,24 @@ export default function GmailTestPage() {
 
   const handleVerifyStatements = async (selectedStatements: FoundStatement[], userDetails?: any) => {
     console.log('Processing selected statements:', selectedStatements);
+    
+    // Save user details to localStorage if provided
+    if (userDetails) {
+      const existingUser = localStorage.getItem('cardgenius_user');
+      const userData = existingUser ? JSON.parse(existingUser) : {};
+      
+      // Update with new details
+      if (userDetails.name) userData.name = userDetails.name;
+      if (userDetails.dob) userData.dob = userDetails.dob;
+      
+      // Save cards if provided
+      if (userDetails.cards && userDetails.cards.length > 0) {
+        userData.cards = userDetails.cards;
+      }
+      
+      localStorage.setItem('cardgenius_user', JSON.stringify(userData));
+      console.log('✅ Saved user details to localStorage');
+    }
     
     try {
       setSyncLoading(true);
@@ -560,27 +535,19 @@ ${result.error ? `Error: ${result.error}` : ''}
 
   return (
     <div className="min-h-screen bg-gray-50 p-8">
-      {/* Signup Form Modal - Show for first-time users */}
-      {showSignup && userEmail && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 overflow-y-auto">
-          <SignupForm
-            email={userEmail}
-            onSubmit={handleSignup}
-            loading={signupLoading}
-          />
-        </div>
-      )}
-      
       {/* Show signup prompt if connected but no user data */}
-      {status === 'connected' && !showSignup && !localStorage.getItem('cardgenius_user') && userEmail && (
+      {status === 'connected' && !localStorage.getItem('cardgenius_user') && userEmail && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg p-8 max-w-md text-center">
-            <h2 className="text-2xl font-bold mb-4">Complete Your Profile</h2>
+            <h2 className="text-2xl font-bold mb-4">Ready to Process Statements</h2>
             <p className="text-gray-600 mb-6">
-              To process your statements, we need a few details. This will take less than a minute.
+              Your information will be collected only when we find statements that need it (for banks like SBI, HSBC, etc.)
             </p>
             <button
-              onClick={() => setShowSignup(true)}
+              onClick={() => {
+                // Close modal and allow user to proceed
+                localStorage.setItem('cardgenius_user', JSON.stringify({ email: userEmail }));
+              }}
               className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700"
             >
               Continue

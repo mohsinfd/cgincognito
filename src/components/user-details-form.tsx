@@ -55,7 +55,7 @@ export default function UserDetailsForm({ onSubmit, onCancel, loading = false, s
   }, []);
 
   // Initialize cards based on selected statements
-  // Only show cards for banks that actually require last4/last6
+  // Only show card digit inputs for banks that actually require last4/last6 (SBI, HSBC)
   const initializeCards = (): CardDetails[] => {
     const banksNeedingCardInfo = ['hsbc', 'sbi']; // Only these banks need card digits
     
@@ -63,7 +63,7 @@ export default function UserDetailsForm({ onSubmit, onCancel, loading = false, s
     
     selectedStatements.forEach(stmt => {
       const bankCodeLower = stmt.bankCode.toLowerCase();
-      // Only include banks that require card digits
+      // Only include banks that require card digits (SBI, HSBC)
       if (banksNeedingCardInfo.includes(bankCodeLower) && !uniqueBanks.has(stmt.bankCode)) {
         uniqueBanks.set(stmt.bankCode, {
           bankCode: stmt.bankCode,
@@ -241,14 +241,14 @@ export default function UserDetailsForm({ onSubmit, onCancel, loading = false, s
           )}
         </div>
 
-        {/* Card Registry Section */}
+        {/* Card Registry Section - Only for SBI and HSBC */}
         {cards.length > 0 && (
           <div className="border-t pt-6">
             <h3 className="text-lg font-semibold text-gray-900 mb-4">
-              Card Details for Each Bank ({cards.length} banks detected)
+              Card Details for SBI and HSBC ({cards.length})
             </h3>
             <p className="text-sm text-gray-600 mb-4">
-              Enter the last 4 or 6 digits for each of your cards. This ensures we use the correct password for each statement.
+              These banks require card digits to generate the correct password. Enter the last 4 or 6 digits for your cards.
             </p>
             
             <div className="space-y-4">
