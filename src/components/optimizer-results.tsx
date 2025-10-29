@@ -87,7 +87,7 @@ export default function OptimizerResults({ statements, selectedMonth }: Props) {
     }
   };
 
-  // Load card matches from localStorage on mount
+  // Load card matches and warnings from localStorage on mount
   useEffect(() => {
     try {
       const saved = localStorage.getItem('cardgenius_card_selections');
@@ -96,8 +96,16 @@ export default function OptimizerResults({ statements, selectedMonth }: Props) {
         console.log('📂 Loading card selections from localStorage:', parsed);
         setCardMatches(parsed);
       }
+      
+      // Also load warnings
+      const savedWarnings = localStorage.getItem('cardgenius_optimization_warnings');
+      if (savedWarnings) {
+        const parsedWarnings = JSON.parse(savedWarnings);
+        console.log('📂 Loading optimization warnings from localStorage');
+        setOptimizationWarnings(parsedWarnings);
+      }
     } catch (error) {
-      console.warn('Failed to load card selections from localStorage:', error);
+      console.warn('Failed to load from localStorage:', error);
     }
   }, []);
 
@@ -127,6 +135,12 @@ export default function OptimizerResults({ statements, selectedMonth }: Props) {
         const saved = localStorage.getItem('cardgenius_card_selections');
         if (saved) {
           existingMatches = JSON.parse(saved);
+          // Also check localStorage for warnings
+          const savedWarnings = localStorage.getItem('cardgenius_optimization_warnings');
+          if (savedWarnings && Object.keys(JSON.parse(savedWarnings)).length > 0) {
+            console.log('✅ Skipping optimizer - found existing selections and warnings in localStorage');
+            return;
+          }
         }
       } catch (error) {
         // Ignore
@@ -137,6 +151,11 @@ export default function OptimizerResults({ statements, selectedMonth }: Props) {
     if (Object.keys(existingMatches).length > 0 && Object.keys(optimizationWarnings).length > 0) {
       console.log('✅ Skipping optimizer - using existing results');
       return;
+    }
+    
+    // If we have matches but no warnings, still need to run (might be fresh selections)
+    if (Object.keys(existingMatches).length > 0 && Object.keys(optimizationWarnings).length === 0) {
+      console.log('⚠️ Have card selections but no warnings - will process selections');
     }
     
     setLoading(true);
@@ -390,6 +409,13 @@ export default function OptimizerResults({ statements, selectedMonth }: Props) {
       setCardMatches(matches);
       setNeedsUserInput(needsInput);
       
+      // Also save warnings to localStorage for persistence
+      try {
+        localStorage.setItem('cardgenius_optimization_warnings', JSON.stringify(warningsByBank));
+      } catch (error) {
+        console.warn('Failed to save warnings to localStorage:', error);
+      }
+      
     } catch (err: any) {
       console.error('Optimizer error:', err);
       setError(err.message || 'Failed to calculate recommendations');
@@ -404,10 +430,26 @@ export default function OptimizerResults({ statements, selectedMonth }: Props) {
     
     console.log('🔍 OptimizerResults building spend vector from statements:', statements.length);
     
+    // Deduplicate statements by ID to prevent double-counting
+    const uniqueStatements = Array.from(
+      new Map(statements.map(stmt => [stmt.id, stmt])).values()
+    );
+    
+    if (uniqueStatements.length !== statements.length) {
+      console.warn(`⚠️ Duplicate statements detected: ${statements.length} → ${uniqueStatements.length} unique`);
+    }
+    
+    // Track all transaction IDs to detect duplicates
+    const seenTransactionIds = new Set<string>();
+    let duplicateCount = 0;
+    
     // Flatten all transactions from all statements
     const allTransactions: any[] = [];
-    statements.forEach((stmt, index) => {
-      console.log(`📊 Statement ${index + 1}: ${stmt.bankCode}`, {
+    let totalDebitAmount = 0;
+    let totalCreditAmount = 0;
+    
+    uniqueStatements.forEach((stmt, index) => {
+      console.log(`📊 Statement ${index + 1}: ${stmt.bankCode} (${stmt.id})`, {
         hasContent: !!stmt.content,
         hasNestedContent: !!stmt.content?.content,
         transactions: stmt.content?.content?.transactions?.length || 0,
@@ -420,15 +462,46 @@ export default function OptimizerResults({ statements, selectedMonth }: Props) {
                           stmt.transactions || 
                           [];
       
-      allTransactions.push(...transactions);
-      console.log(`  📈 Added ${transactions.length} transactions to spend vector`);
+      transactions.forEach((txn: any) => {
+        // Create unique ID for transaction to detect duplicates
+        const txnId = `${stmt.id}_${txn.description || ''}_${txn.amount}_${txn.date || ''}`;
+        
+        if (seenTransactionIds.has(txnId)) {
+          duplicateCount++;
+          console.warn(`⚠️ Duplicate transaction detected: ${txn.description} - ₹${txn.amount}`);
+          return; // Skip duplicate
+        }
+        seenTransactionIds.add(txnId);
+        
+        // Track credits vs debits for debugging
+        const typeStr = (txn.type || '').toString().toLowerCase();
+        const isCredit = typeStr === 'cr' || typeStr === 'credit';
+        const amount = Math.abs(txn.amount || 0);
+        
+        if (isCredit) {
+          totalCreditAmount += amount;
+          // Skip credits (they're payments, not spending)
+          // buildCompleteSpendVector will filter these anyway, but better to be explicit
+          return;
+        } else {
+          totalDebitAmount += amount;
+        }
+        
+        allTransactions.push(txn);
+      });
+      
+      console.log(`  📈 Added ${transactions.length} transactions from statement ${stmt.id}`);
     });
 
     console.log(`📊 Total transactions for optimizer: ${allTransactions.length}`);
+    console.log(`💰 Spend validation: Debits=₹${totalDebitAmount.toLocaleString()}, Credits=₹${totalCreditAmount.toLocaleString()}`);
+    if (duplicateCount > 0) {
+      console.warn(`⚠️ Skipped ${duplicateCount} duplicate transactions`);
+    }
 
     // Calculate actual months of data from statement dates
     const uniqueMonths = new Set<string>();
-    statements.forEach(stmt => {
+    uniqueStatements.forEach(stmt => {
       const date = stmt.content?.content?.summary?.statement_date ||
                    stmt.content?.summary?.statement_date ||
                    stmt.statement_date;

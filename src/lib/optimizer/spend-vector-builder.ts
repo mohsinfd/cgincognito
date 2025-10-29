@@ -31,9 +31,16 @@ export function buildCompleteSpendVector(
 
   // Process each transaction
   transactions.forEach(txn => {
-    // Skip credits (except cashback/rewards)
-    if (txn.type === 'Cr' && !txn.description.toLowerCase().includes('cashback')) {
-      return;
+    // Skip credits (except cashback/rewards) - credits are payments, not spending
+    const typeStr = (txn.type || '').toString().toLowerCase();
+    const isCredit = typeStr === 'cr' || typeStr === 'credit';
+    
+    if (isCredit) {
+      // Only include cashback/rewards credits
+      const descLower = (txn.description || '').toLowerCase();
+      if (!descLower.includes('cashback') && !descLower.includes('reward')) {
+        return; // Skip payment credits
+      }
     }
 
     // Categorize
@@ -47,7 +54,8 @@ export function buildCompleteSpendVector(
     // Extract month from date (YYYY-MM format)
     const month = txn.date.substring(0, 7); // "2025-10-15" → "2025-10"
 
-    const amount = txn.type === 'Dr' ? txn.amount : -txn.amount;
+    // Use absolute amount for debits, negative for credits (shouldn't reach here due to filter above)
+    const amount = !isCredit ? Math.abs(txn.amount) : -Math.abs(txn.amount);
 
     // Initialize category map if needed
     if (!categoryMonthMap[category]) {
