@@ -463,11 +463,18 @@ export default function OptimizerResults({ statements, selectedMonth }: Props) {
       {Object.entries(optimizationWarnings).map(([cardKey, warnings]) => {
         // Parse cardKey to extract bankCode and cardId
         const [bankCode, cardId] = cardKey.split('_');
-        const matchResults = cardMatches[bankCode];
+        const matchResultsRaw = cardMatches[bankCode] as any;
         const needsConfirmation = needsUserInput[bankCode];
         
+        // Normalize matchResults to always be an array
+        const matchResults = Array.isArray(matchResultsRaw)
+          ? matchResultsRaw
+          : matchResultsRaw
+            ? [matchResultsRaw]
+            : [];
+        
         // Find the specific card match
-        const matchResult = matchResults?.find(m => m.card.id.toString() === cardId);
+        const matchResult = matchResults.find((m: any) => m.card.id.toString() === cardId);
         const cardName = matchResult?.card.name || getBankName(bankCode);
         
         return (
@@ -587,11 +594,13 @@ export default function OptimizerResults({ statements, selectedMonth }: Props) {
           // Store selection but don't call API yet
           setCardMatches(prev => ({
             ...prev,
-            [bankCode]: {
-              card,
-              confidence: 100,
-              method: 'manual'
-            }
+            [bankCode]: [
+              {
+                card,
+                confidence: 100,
+                method: 'manual'
+              }
+            ]
           }));
         }}
         onManualEntry={(bankCode, cardName) => {
@@ -605,11 +614,13 @@ export default function OptimizerResults({ statements, selectedMonth }: Props) {
           // Store selection but don't call API yet
           setCardMatches(prev => ({
             ...prev,
-            [bankCode]: {
-              card: manualCard,
-              confidence: 100,
-              method: 'manual'
-            }
+            [bankCode]: [
+              {
+                card: manualCard,
+                confidence: 100,
+                method: 'manual'
+              }
+            ]
           }));
         }}
         onClose={async () => {
