@@ -699,30 +699,37 @@ export async function POST(request: NextRequest) {
       estimatedTimeRemaining: statements.length * 15
     });
 
-    // Process each statement using the proven script method
-    for (let statementIndex = 0; statementIndex < statements.length; statementIndex++) {
-      const statement = statements[statementIndex];
-      
+    // Process ALL statements in PARALLEL for faster LLM parsing
+    let completedCount = 0;
+    const updateProgressLock = new Set<number>(); // Prevent race conditions on progress updates
+    
+    // Extract processing logic into a function for parallel execution
+    const processStatement = async (statement: any, statementIndex: number): Promise<any> => {
       // Track bank start time
       if (!bankStartTimes.has(statement.bank_code)) {
         bankStartTimes.set(statement.bank_code, Date.now());
       }
       
-      // Update progress - current statement
-      await updateProgress({
-        totalStatements: statements.length,
-        completedStatements: statementIndex,
-        currentStatement: {
-          bankCode: statement.bank_code,
-          filename: statement.attachment.filename,
-          phase: 'download'
-        },
-        currentPhase: 'pdf_processing',
-        phaseProgress: Math.round((statementIndex / statements.length) * 100),
-        elapsedTime: Math.floor((Date.now() - startTime) / 1000),
-        estimatedTimeRemaining: (statements.length - statementIndex) * 15,
-        completedBanks: [...completedBanks]
-      });
+      // Update progress - statement starting (with lock to prevent race conditions)
+      if (!updateProgressLock.has(statementIndex)) {
+        updateProgressLock.add(statementIndex);
+        completedCount++;
+        await updateProgress({
+          totalStatements: statements.length,
+          completedStatements: completedCount,
+          currentStatement: {
+            bankCode: statement.bank_code,
+            filename: statement.attachment.filename,
+            phase: 'download'
+          },
+          currentPhase: 'pdf_processing',
+          phaseProgress: Math.round((completedCount / statements.length) * 100),
+          elapsedTime: Math.floor((Date.now() - startTime) / 1000),
+          estimatedTimeRemaining: Math.max(0, (statements.length - completedCount) * 5),
+          completedBanks: [...completedBanks]
+        });
+      }
+      
       try {
         console.log(`📄 V2 Processing ${statement.bank_code}: ${statement.attachment.filename}`);
         
@@ -833,23 +840,8 @@ export async function POST(request: NextRequest) {
           
           console.log(`🔑 Attempt ${attemptIndex + 1}/${attempts.length}: "${attempt.password}" (${attempt.source})`);
           
-          // Update progress - decrypt phase
-          await updateProgress({
-            totalStatements: statements.length,
-            completedStatements: statementIndex,
-            currentStatement: {
-              bankCode: statement.bank_code,
-              filename: statement.attachment.filename,
-              phase: 'decrypt',
-              attempts: attemptIndex + 1,
-              maxAttempts: attempts.length,
-              currentPassword: attempt.password
-            },
-            currentPhase: 'pdf_processing',
-            phaseProgress: Math.round((statementIndex / statements.length) * 100),
-            elapsedTime: Math.floor((Date.now() - startTime) / 1000),
-            estimatedTimeRemaining: (statements.length - statementIndex) * 15
-          });
+          // Update progress - decrypt phase (no need for detailed updates in parallel mode)
+          // Keeping lightweight to avoid too many concurrent updates
           
           try {
             // Try qpdf decryption (same as test-single-pdf.js)
@@ -858,20 +850,7 @@ export async function POST(request: NextRequest) {
             if (decryptResult.success) {
               console.log(`✅ Decryption successful with password: "${attempt.password}"`);
               
-              // Update progress - parse phase
-              await updateProgress({
-                totalStatements: statements.length,
-                completedStatements: statementIndex,
-                currentStatement: {
-                  bankCode: statement.bank_code,
-                  filename: statement.attachment.filename,
-                  phase: 'parse'
-                },
-                currentPhase: 'pdf_processing',
-                phaseProgress: Math.round((statementIndex / statements.length) * 100),
-                elapsedTime: Math.floor((Date.now() - startTime) / 1000),
-                estimatedTimeRemaining: (statements.length - statementIndex) * 15
-              });
+              // Progress update removed for parallel processing efficiency
 
               // Extract text from decrypted PDF (same as test-single-pdf.js)
               const textResult = extractTextFromDecryptedPDF(decryptResult.decryptedPath!);
@@ -919,20 +898,7 @@ export async function POST(request: NextRequest) {
                   }
                 }
                 
-                // Update progress - save phase
-                await updateProgress({
-                  totalStatements: statements.length,
-                  completedStatements: statementIndex + 1,
-                  currentStatement: {
-                    bankCode: statement.bank_code,
-                    filename: statement.attachment.filename,
-                    phase: 'save'
-                  },
-                  currentPhase: 'pdf_processing',
-                  phaseProgress: Math.round(((statementIndex + 1) / statements.length) * 100),
-                  elapsedTime: Math.floor((Date.now() - startTime) / 1000),
-                  estimatedTimeRemaining: (statements.length - statementIndex - 1) * 15
-                });
+                // Progress update will be done after completion
                 
                 // Cleanup decrypted file
                 if (existsSync(decryptResult.decryptedPath!)) {
@@ -969,42 +935,42 @@ export async function POST(request: NextRequest) {
           parsed: success,
         };
 
-        results.push(processedStatement);
+        // Update progress - completed
+        completedCount++;
+        await updateProgress({
+          totalStatements: statements.length,
+          completedStatements: completedCount,
+          currentPhase: 'pdf_processing',
+          phaseProgress: Math.round((completedCount / statements.length) * 100),
+          elapsedTime: Math.floor((Date.now() - startTime) / 1000),
+          estimatedTimeRemaining: Math.max(0, (statements.length - completedCount) * 5),
+          completedBanks: [...completedBanks]
+        });
 
         if (success) {
-          successCount++;
           console.log(`✅ V2 Successfully processed ${statement.bank_code} with password: ${usedPassword}`);
         } else {
-          errorCount++;
           console.log(`❌ V2 Failed to process ${statement.bank_code}: All password attempts failed`);
         }
 
-        // Check if this was the last statement for this bank
-        const remainingStatementsForBank = statements.slice(statementIndex + 1).filter(s => s.bank_code === statement.bank_code);
-        if (remainingStatementsForBank.length === 0) {
-          // This was the last statement for this bank - mark bank as completed
-          const bankStartTime = bankStartTimes.get(statement.bank_code) || startTime;
-          const bankDuration = Math.floor((Date.now() - bankStartTime) / 1000);
-          const bankStatements = statements.filter(s => s.bank_code === statement.bank_code);
-          const bankSuccessCount = results.filter(r => r.bank_code === statement.bank_code && r.parsed).length;
-          
-          completedBanks.push({
-            bankCode: statement.bank_code,
-            statementCount: bankStatements.length,
-            duration: bankDuration,
-            status: bankSuccessCount === bankStatements.length ? 'success' : 
-                   bankSuccessCount === 0 ? 'failed' : 'partial',
-            transactionsFound: results.filter(r => r.bank_code === statement.bank_code && r.parsed)
-              .reduce((sum, r) => sum + (r.processing_result?.transactionCount || 0), 0)
-          });
-          
-          console.log(`🏦 Bank ${statement.bank_code} completed: ${bankSuccessCount}/${bankStatements.length} statements successful`);
-        }
+        return processedStatement;
 
       } catch (error: any) {
         console.error(`💥 V2 Error processing ${statement.bank_code}:`, error);
         
-        results.push({
+        // Update progress - error (atomic increment for parallel safety)
+        const currentCompleted = ++completedCount;
+        await updateProgress({
+          totalStatements: statements.length,
+          completedStatements: currentCompleted,
+          currentPhase: 'pdf_processing',
+          phaseProgress: Math.round((currentCompleted / statements.length) * 100),
+          elapsedTime: Math.floor((Date.now() - startTime) / 1000),
+          estimatedTimeRemaining: Math.max(0, (statements.length - currentCompleted) * 5),
+          completedBanks: [...completedBanks]
+        });
+        
+        return {
           ...statement,
           processing_result: {
             success: false,
@@ -1012,10 +978,50 @@ export async function POST(request: NextRequest) {
             attempts: 0,
           },
           parsed: false,
-        });
-        
-        errorCount++;
+        };
       }
+    };
+
+    // Process ALL statements in parallel using Promise.allSettled
+    console.log(`🚀 Processing ${statements.length} statements in PARALLEL for faster LLM parsing...`);
+    const processingPromises = statements.map((statement, index) => processStatement(statement, index));
+    const processingResults = await Promise.allSettled(processingPromises);
+    
+    // Collect results and count successes/errors
+    for (const result of processingResults) {
+      if (result.status === 'fulfilled') {
+        results.push(result.value);
+        if (result.value.parsed) {
+          successCount++;
+        } else {
+          errorCount++;
+        }
+      } else {
+        // Promise rejected - shouldn't happen since we catch all errors, but handle just in case
+        errorCount++;
+        console.error('Unexpected promise rejection:', result.reason);
+      }
+    }
+
+    // Calculate bank completion stats after all statements finish
+    const uniqueBanks = Array.from(new Set(statements.map(s => s.bank_code)));
+    for (const bankCode of uniqueBanks) {
+      const bankStartTime = bankStartTimes.get(bankCode) || startTime;
+      const bankDuration = Math.floor((Date.now() - bankStartTime) / 1000);
+      const bankStatements = statements.filter(s => s.bank_code === bankCode);
+      const bankSuccessCount = results.filter(r => r.bank_code === bankCode && r.parsed).length;
+      
+      completedBanks.push({
+        bankCode,
+        statementCount: bankStatements.length,
+        duration: bankDuration,
+        status: bankSuccessCount === bankStatements.length ? 'success' : 
+               bankSuccessCount === 0 ? 'failed' : 'partial',
+        transactionsFound: results.filter(r => r.bank_code === bankCode && r.parsed)
+          .reduce((sum, r) => sum + (r.processing_result?.transactionCount || 0), 0)
+      });
+      
+      console.log(`🏦 Bank ${bankCode} completed: ${bankSuccessCount}/${bankStatements.length} statements successful`);
     }
 
     console.log(`📊 V2 Processing complete: ${successCount} success, ${errorCount} errors`);

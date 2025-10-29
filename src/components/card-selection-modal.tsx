@@ -19,6 +19,13 @@ export interface BankSelectionInfo {
     bankName: string;
   } | null;
   confidence?: number;
+  detectedCards?: Array<{
+    id: number;
+    name: string;
+    bankId: number;
+    bankName: string;
+  }>; // Cards that were auto-detected (for multi-select mode)
+  allowMultiple?: boolean; // Whether to allow selecting multiple cards
 }
 
 interface CardSelectionModalProps {
@@ -33,6 +40,7 @@ interface CardSelectionModalProps {
     bankName: string;
   }>;
   onCardSelected: (bankCode: string, card: any) => void;
+  onCardsSelected?: (bankCode: string, cards: any[]) => void; // For multi-select
   onManualEntry: (bankCode: string, cardName: string) => void;
   onClose: () => void;
 }
@@ -44,6 +52,7 @@ export default function CardSelectionModal({
   bankName,
   availableCards = [],
   onCardSelected,
+  onCardsSelected,
   onManualEntry,
   onClose
 }: CardSelectionModalProps) {
@@ -119,7 +128,10 @@ export default function CardSelectionModal({
           bankName={currentBank.bankName}
           availableCards={currentBank.availableCards}
           mostLikelyCard={currentBank.mostLikelyCard}
+          detectedCards={currentBank.detectedCards}
+          allowMultiple={currentBank.allowMultiple}
           onCardSelected={handleCardSelected}
+          onCardsSelected={onCardsSelected ? (cards) => onCardsSelected(currentBank.bankCode, cards) : undefined}
           onManualEntry={handleManualEntry}
         />
         

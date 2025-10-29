@@ -108,7 +108,9 @@ export type CGCardRecommendation = {
     savings: number;
     maxCap: number;
     totalMaxCap: number;
-    cashback_percentage: string;
+    cashback_percentage?: string;
+    conv_rate?: number; // Conversion rate for rewards cards (e.g., 0.65 = 1 RP = ₹0.65)
+    points_earned?: number; // Points earned (for rewards cards)
     explanation: string[];
   }>;
   product_usps: Array<{

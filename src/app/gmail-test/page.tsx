@@ -12,6 +12,7 @@ import NonSupportedBanks from '@/components/non-supported-banks';
 import GameSelector from '@/components/game-selector';
 import ParsingLogViewer from '@/components/parsing-log-viewer';
 import { saveStatement } from '@/lib/storage/browser-storage';
+import SignupForm from '@/components/signup-form';
 
 export default function GmailTestPage() {
   const [connecting, setConnecting] = useState(false);
@@ -23,6 +24,8 @@ export default function GmailTestPage() {
   const [syncLoading, setSyncLoading] = useState(false);
   const [processingStatus, setProcessingStatus] = useState<'idle' | 'processing' | 'completed' | 'error'>('idle');
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [showSignup, setShowSignup] = useState(false);
+  const [signupLoading, setSignupLoading] = useState(false);
   const [missingFieldsError, setMissingFieldsError] = useState<{
     message: string;
     missingFields: Record<string, string[]>;
@@ -63,14 +66,24 @@ export default function GmailTestPage() {
             const finalEmail = data.email;
             setUserEmail(finalEmail);
             
-            // Store minimal user record (just email for now)
-            // Details will be collected when processing statements that need them
-            localStorage.setItem('cardgenius_user', JSON.stringify({ 
-              email: finalEmail,
-              createdAt: new Date().toISOString()
-            }));
+            const existingUser = localStorage.getItem('cardgenius_user');
+            if (existingUser) {
+              const userData = JSON.parse(existingUser);
+              if (userData.name && userData.dob) {
+                // User already has name and DOB, update email only
+                localStorage.setItem('cardgenius_user', JSON.stringify({ 
+                  ...userData,
+                  email: finalEmail,
+                }));
+                return;
+              }
+            }
+            
+            // Show signup form for new users or users without name/DOB
+            setShowSignup(true);
           } else {
             setUserEmail('Connected (email unknown)');
+            setShowSignup(true);
           }
         })
         .catch(() => {
@@ -79,12 +92,22 @@ export default function GmailTestPage() {
       } else {
         setUserEmail(userEmailValue);
         
-        // Store minimal user record (just email for now)
-        // Details will be collected when processing statements that need them
-        localStorage.setItem('cardgenius_user', JSON.stringify({ 
-          email: userEmailValue,
-          createdAt: new Date().toISOString()
-        }));
+        // Check if user already has name and DOB
+        const existingUser = localStorage.getItem('cardgenius_user');
+        if (existingUser) {
+          const userData = JSON.parse(existingUser);
+          if (userData.name && userData.dob) {
+            // User already has name and DOB, update email only
+            localStorage.setItem('cardgenius_user', JSON.stringify({ 
+              ...userData,
+              email: userEmailValue,
+            }));
+            return;
+          }
+        }
+        
+        // Show signup form for new users or users without name/DOB
+        setShowSignup(true);
       }
       
       // Clean URL
@@ -410,6 +433,32 @@ Check console for detailed results!
     setFoundStatements([]);
   };
 
+  const handleSignup = async (signupData: { name: string; dob: string }) => {
+    try {
+      setSignupLoading(true);
+      
+      // Save user data to localStorage
+      const existingUser = localStorage.getItem('cardgenius_user');
+      const userData = existingUser ? JSON.parse(existingUser) : {};
+      
+      localStorage.setItem('cardgenius_user', JSON.stringify({
+        ...userData,
+        email: userEmail || userData.email || 'unknown',
+        name: signupData.name,
+        dob: signupData.dob,
+        createdAt: userData.createdAt || new Date().toISOString()
+      }));
+      
+      setShowSignup(false);
+      console.log('✅ User signup completed');
+    } catch (error) {
+      console.error('Signup failed:', error);
+      setError('Failed to save signup information');
+    } finally {
+      setSignupLoading(false);
+    }
+  };
+
   const testEmailBody = async (statement: FoundStatement) => {
     try {
       setSyncLoading(true);
@@ -568,6 +617,19 @@ ${result.error ? `Error: ${result.error}` : ''}
             </a>
           </div>
         </div>
+
+        {/* Signup Form Modal */}
+        {showSignup && userEmail && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+              <SignupForm
+                email={userEmail}
+                onSubmit={handleSignup}
+                loading={signupLoading}
+              />
+            </div>
+          </div>
+        )}
 
         {/* Status Card */}
         <div className="bg-white rounded-lg shadow-lg p-6 mb-6">

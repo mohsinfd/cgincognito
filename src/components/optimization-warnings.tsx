@@ -135,7 +135,16 @@ export default function OptimizationWarnings({ warnings, userCardName }: Props) 
                                 Total spend: <strong>₹{warning.monthlySpend.toLocaleString()}</strong>
                               </p>
                               <p className="text-sm text-red-600 mt-1">
-                                Cap: ₹{warning.capAmount.toLocaleString()} cashback
+                                {warning.isRewardsCard && warning.capAmountInPoints ? (
+                                  <>
+                                    Cap: {warning.capAmountInPoints.toLocaleString()} reward points 
+                                    (₹{warning.capAmount.toLocaleString()} value)
+                                  </>
+                                ) : (
+                                  <>
+                                    Cap: ₹{warning.capAmount.toLocaleString()} cashback
+                                  </>
+                                )}
                               </p>
                             </div>
                             <div className="text-right">

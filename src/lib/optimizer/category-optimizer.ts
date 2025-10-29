@@ -30,10 +30,13 @@ export type CapHitWarning = {
   userCard: string;
   userCardId: number;
   monthlySpend: number;
-  capAmount: number;
-  totalCapAmount: number;
+  capAmount: number; // Cap amount in rupees (converted if rewards card)
+  capAmountInPoints?: number; // Original cap in points (only for rewards cards)
+  totalCapAmount: number; // Total cap in rupees
   excessSpend: number;
   currentSavings: number;
+  isRewardsCard?: boolean; // True if this is a rewards card
+  convRate?: number; // Conversion rate (e.g., 0.65 = 1 RP = ₹0.65)
   message: string;
 };
 
@@ -155,12 +158,22 @@ export function detectCapHits(
       const totalSpend = categories.reduce((sum, cat) => sum + cat.spend, 0);
       const totalSavings = categories.reduce((sum, cat) => sum + cat.savings, 0);
       
-      // Calculate max eligible spend from cap and cashback rate
-      let maxEligibleSpend = firstCat.maxCap; // Default to cap amount
+      // Calculate max eligible spend from cap
+      // For rewards cards: maxCap is in points, convert to rupees using conv_rate
+      // For cashback cards: maxCap is already in rupees
+      let maxCapInRupees = firstCat.maxCap;
+      if (firstCat.conv_rate && firstCat.conv_rate > 0) {
+        // Rewards card: convert points to rupees
+        maxCapInRupees = firstCat.maxCap * firstCat.conv_rate;
+      }
+      // Note: If no conv_rate, it's a cashback card and maxCap is already in rupees
+      
+      // Calculate max eligible spend from cap (for cap calculation, not for display)
+      let maxEligibleSpend = maxCapInRupees;
       if (firstCat.cashback_percentage) {
         const rate = parseFloat(firstCat.cashback_percentage) / 100;
         if (rate > 0) {
-          maxEligibleSpend = firstCat.maxCap / rate;
+          maxEligibleSpend = maxCapInRupees / rate;
         }
       }
       
@@ -176,30 +189,45 @@ export function detectCapHits(
           userCard: userCardResponse.card_name,
           userCardId: userCardResponse.id,
           monthlySpend: totalSpend,
-          capAmount: firstCat.maxCap,
-          totalCapAmount: firstCat.totalMaxCap || firstCat.maxCap,
+          capAmount: maxCapInRupees, // Store converted value in rupees
+          capAmountInPoints: firstCat.conv_rate ? firstCat.maxCap : undefined, // Original points for rewards cards
+          totalCapAmount: firstCat.totalMaxCap ? (firstCat.conv_rate ? firstCat.totalMaxCap * (firstCat.conv_rate || 1) : firstCat.totalMaxCap) : maxCapInRupees,
           excessSpend: excessSpend,
           currentSavings: totalSavings,
+          isRewardsCard: !!firstCat.conv_rate,
+          convRate: firstCat.conv_rate,
           message: generateSharedCapHitMessage(
             categoryNames,
             userCardResponse.card_name,
             totalSpend,
             maxEligibleSpend,
-            firstCat.maxCap,
+            maxCapInRupees,
+            firstCat.maxCap, // Original maxCap (points or rupees)
             excessSpend,
-            firstCat.cashback_percentage
+            firstCat.cashback_percentage,
+            firstCat.conv_rate
           ),
         });
       }
     } else {
       // Not a shared cap - process each category individually
       categories.forEach(category => {
-        // Calculate max eligible spend
-        let maxEligibleSpend = category.maxCap;
+        // Calculate max eligible spend from cap
+        // For rewards cards: maxCap is in points, convert to rupees using conv_rate
+        // For cashback cards: maxCap is already in rupees
+        let maxCapInRupees = category.maxCap;
+        if (category.conv_rate && category.conv_rate > 0) {
+          // Rewards card: convert points to rupees
+          maxCapInRupees = category.maxCap * category.conv_rate;
+        }
+        // Note: If no conv_rate, it's a cashback card and maxCap is already in rupees
+        
+        // Calculate max eligible spend from cap (for cap calculation, not for display)
+        let maxEligibleSpend = maxCapInRupees;
         if (category.cashback_percentage) {
-          const rate = parseFloat(category.cashback_percentage) / 100;
+          const rate = parseFloat(category.cashback_percentage || '0') / 100;
           if (rate > 0) {
-            maxEligibleSpend = category.maxCap / rate;
+            maxEligibleSpend = maxCapInRupees / rate;
           }
         }
         
@@ -213,20 +241,25 @@ export function detectCapHits(
             categoryKey: category.on,
             userCard: userCardResponse.card_name,
             userCardId: userCardResponse.id,
-            monthlySpend: category.spend,
-            capAmount: category.maxCap,
-            totalCapAmount: category.totalMaxCap || category.maxCap,
-            excessSpend: excessSpend,
-            currentSavings: category.savings,
-            message: generateCapHitMessage(
-              categoryName,
-              userCardResponse.card_name,
-              category.spend,
-              maxEligibleSpend,
-              category.maxCap,
-              excessSpend,
-              category.cashback_percentage
-            ),
+          monthlySpend: category.spend,
+          capAmount: maxCapInRupees, // Store converted value in rupees
+          capAmountInPoints: category.conv_rate ? category.maxCap : undefined, // Original points for rewards cards
+          totalCapAmount: category.totalMaxCap ? (category.conv_rate ? category.totalMaxCap * (category.conv_rate || 1) : category.totalMaxCap) : maxCapInRupees,
+          excessSpend: excessSpend,
+          currentSavings: category.savings,
+          isRewardsCard: !!category.conv_rate,
+          convRate: category.conv_rate,
+          message: generateCapHitMessage(
+            categoryName,
+            userCardResponse.card_name,
+            category.spend,
+            maxEligibleSpend,
+            maxCapInRupees,
+            category.maxCap, // Original maxCap (points or rupees)
+            excessSpend,
+            category.cashback_percentage,
+            category.conv_rate
+          ),
           });
         }
       });
@@ -286,15 +319,28 @@ function generateCapHitMessage(
   cardName: string,
   spend: number,
   maxEligibleSpend: number,
-  capAmount: number,
+  capAmountInRupees: number,
+  capAmountOriginal: number, // Original maxCap (points or rupees)
   excessSpend: number,
-  cashbackPercentage?: string
+  cashbackPercentage?: string,
+  convRate?: number
 ): string {
+  const isRewardsCard = !!convRate;
   const rate = cashbackPercentage ? `${cashbackPercentage}%` : '';
-  return `You spent ₹${spend.toLocaleString()} on ${category} using ${cardName}, ` +
-    `but this card only gives ${rate} cashback on the first ₹${maxEligibleSpend.toLocaleString()} ` +
-    `(₹${capAmount.toLocaleString()} cashback cap). ` +
-    `You're not earning rewards on ₹${excessSpend.toLocaleString()} of your spending.`;
+  
+  if (isRewardsCard) {
+    // Rewards card: cap is in points
+    return `You spent ₹${spend.toLocaleString()} on ${category} using ${cardName}, ` +
+      `but this card only gives rewards on the first ₹${maxEligibleSpend.toLocaleString()} ` +
+      `(${capAmountOriginal.toLocaleString()} reward points cap = ₹${capAmountInRupees.toLocaleString()}). ` +
+      `You're not earning rewards on ₹${excessSpend.toLocaleString()} of your spending.`;
+  } else {
+    // Cashback card: cap is in rupees
+    return `You spent ₹${spend.toLocaleString()} on ${category} using ${cardName}, ` +
+      `but this card only gives ${rate} cashback on the first ₹${maxEligibleSpend.toLocaleString()} ` +
+      `(₹${capAmountInRupees.toLocaleString()} cashback cap). ` +
+      `You're not earning rewards on ₹${excessSpend.toLocaleString()} of your spending.`;
+  }
 }
 
 /**
@@ -305,19 +351,31 @@ function generateSharedCapHitMessage(
   cardName: string,
   totalSpend: number,
   maxEligibleSpend: number,
-  capAmount: number,
+  capAmountInRupees: number,
+  capAmountOriginal: number, // Original maxCap (points or rupees)
   excessSpend: number,
-  cashbackPercentage?: string
+  cashbackPercentage?: string,
+  convRate?: number
 ): string {
   const categoriesList = categories.length > 2 
     ? `${categories.slice(0, -1).join(', ')}, and ${categories[categories.length - 1]}`
     : categories.join(' and ');
   
+  const isRewardsCard = !!convRate;
   const rate = cashbackPercentage ? `${cashbackPercentage}%` : '';
   
-  return `You spent ₹${totalSpend.toLocaleString()} across ${categoriesList} using ${cardName}. ` +
-    `These categories likely share a combined ₹${capAmount.toLocaleString()} cashback cap ` +
-    `(₹${maxEligibleSpend.toLocaleString()} eligible spend at ${rate}). ` +
-    `You're not earning rewards on approximately ₹${excessSpend.toLocaleString()} of your spending.`;
+  if (isRewardsCard) {
+    // Rewards card: cap is in points
+    return `You spent ₹${totalSpend.toLocaleString()} across ${categoriesList} using ${cardName}. ` +
+      `These categories likely share a combined ${capAmountOriginal.toLocaleString()} reward points cap ` +
+      `(₹${maxEligibleSpend.toLocaleString()} eligible spend = ₹${capAmountInRupees.toLocaleString()} value). ` +
+      `You're not earning rewards on approximately ₹${excessSpend.toLocaleString()} of your spending.`;
+  } else {
+    // Cashback card: cap is in rupees
+    return `You spent ₹${totalSpend.toLocaleString()} across ${categoriesList} using ${cardName}. ` +
+      `These categories likely share a combined ₹${capAmountInRupees.toLocaleString()} cashback cap ` +
+      `(₹${maxEligibleSpend.toLocaleString()} eligible spend at ${rate}). ` +
+      `You're not earning rewards on approximately ₹${excessSpend.toLocaleString()} of your spending.`;
+  }
 }
 

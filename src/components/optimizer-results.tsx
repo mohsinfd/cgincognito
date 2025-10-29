@@ -87,6 +87,32 @@ export default function OptimizerResults({ statements, selectedMonth }: Props) {
     }
   };
 
+  // Load card matches from localStorage on mount
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('cardgenius_card_selections');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        console.log('📂 Loading card selections from localStorage:', parsed);
+        setCardMatches(parsed);
+      }
+    } catch (error) {
+      console.warn('Failed to load card selections from localStorage:', error);
+    }
+  }, []);
+
+  // Save card matches to localStorage whenever they change
+  useEffect(() => {
+    if (Object.keys(cardMatches).length > 0) {
+      try {
+        localStorage.setItem('cardgenius_card_selections', JSON.stringify(cardMatches));
+        console.log('💾 Saved card selections to localStorage');
+      } catch (error) {
+        console.warn('Failed to save card selections to localStorage:', error);
+      }
+    }
+  }, [cardMatches]);
+
   useEffect(() => {
     if (statements.length === 0) return;
     
@@ -94,8 +120,21 @@ export default function OptimizerResults({ statements, selectedMonth }: Props) {
   }, [statements, selectedMonth]); // Note: runOptimizer uses cardMatches and optimizationWarnings from state
 
   const runOptimizer = async () => {
+    // Check both state and localStorage for existing selections
+    let existingMatches = cardMatches;
+    if (Object.keys(cardMatches).length === 0) {
+      try {
+        const saved = localStorage.getItem('cardgenius_card_selections');
+        if (saved) {
+          existingMatches = JSON.parse(saved);
+        }
+      } catch (error) {
+        // Ignore
+      }
+    }
+    
     // If we already have card matches and warnings, don't run again
-    if (Object.keys(cardMatches).length > 0 && Object.keys(optimizationWarnings).length > 0) {
+    if (Object.keys(existingMatches).length > 0 && Object.keys(optimizationWarnings).length > 0) {
       console.log('✅ Skipping optimizer - using existing results');
       return;
     }
@@ -175,11 +214,30 @@ export default function OptimizerResults({ statements, selectedMonth }: Props) {
         
         // NEW: Match EACH statement to detect multiple cards
         const statementMatches = new Map<string, CardMatchResult>();
+        const uniqueCardNumbers = new Set<string>();
         
         for (const stmt of bankStatements) {
-          const matchResult = autoMatchCard(stmt, 80);
+          // Extract card number (last4) if available
+          const cardLast4 = 
+            stmt.cardLast4 ||
+            stmt.content?.content?.card_details?.num?.slice(-4) ||
+            stmt.processing_result?.parsedData?.card_details?.num?.slice(-4) ||
+            stmt.content?.card_details?.num?.slice(-4);
           
-          if (matchResult && matchResult.confidence >= 80) {
+          if (cardLast4) {
+            uniqueCardNumbers.add(cardLast4);
+          }
+          
+          // Try matching with standard threshold first
+          let matchResult = autoMatchCard(stmt, 80);
+          
+          // If no match but we have multiple card numbers, try lower threshold
+          if (!matchResult && uniqueCardNumbers.size > 1) {
+            console.log(`🔍 Multiple card numbers detected for ${bankCode}, trying lower threshold...`);
+            matchResult = autoMatchCard(stmt, 50); // Lower threshold when multiple cards likely
+          }
+          
+          if (matchResult && matchResult.confidence >= 50) {
             // Use card name as key to detect multiple cards
             const cardKey = matchResult.card.name;
             if (!statementMatches.has(cardKey)) {
@@ -190,6 +248,17 @@ export default function OptimizerResults({ statements, selectedMonth }: Props) {
         
         const uniqueMatches = Array.from(statementMatches.values());
         
+        // If we have multiple unique card numbers, treat as multiple cards scenario
+        const hasMultipleCardNumbers = uniqueCardNumbers.size > 1;
+        
+        console.log(`📊 ${bankCode} analysis:`, {
+          statements: bankStatements.length,
+          uniqueCardNumbers: uniqueCardNumbers.size,
+          uniqueCardNames: uniqueMatches.length,
+          cardNumbers: Array.from(uniqueCardNumbers),
+          cardNames: uniqueMatches.map(m => m.card.name)
+        });
+        
         if (uniqueMatches.length === 0) {
           // No confident matches - need user input
           banksNeedingSelection.push({
@@ -197,19 +266,32 @@ export default function OptimizerResults({ statements, selectedMonth }: Props) {
             bankName: getBankName(bankCode),
             availableCards: getCardsForBank(bankCode),
             mostLikelyCard: null,
-            confidence: 0
+            confidence: 0,
+            allowMultiple: hasMultipleCardNumbers, // Allow multiple if distinct card numbers
+            detectedCards: hasMultipleCardNumbers ? [] : undefined // No detected cards, but allow multi-select
           });
           needsInput[bankCode] = true;
-        } else if (uniqueMatches.length === 1) {
-          // Single card detected - proceed normally
+        } else if (uniqueMatches.length === 1 && !hasMultipleCardNumbers) {
+          // Single card detected and single card number - proceed normally
           matches[bankCode] = uniqueMatches;
           needsInput[bankCode] = false;
         } else {
-          // MULTIPLE CARDS DETECTED - special handling
-          console.log(`🎯 ${bankCode} has ${uniqueMatches.length} cards:`, uniqueMatches.map(m => m.card.name));
-          matches[bankCode] = uniqueMatches;
-          needsInput[bankCode] = false;
-          // We'll process each card separately
+          // MULTIPLE CARDS SCENARIO (either multiple card names OR multiple card numbers)
+          // Always prompt for selection if:
+          // 1. Multiple card names detected, OR
+          // 2. Multiple card numbers detected (even if only one card name matched)
+          console.log(`🎯 ${bankCode} has ${uniqueMatches.length} card name(s) and ${uniqueCardNumbers.size} card number(s) detected`);
+          
+          banksNeedingSelection.push({
+            bankCode,
+            bankName: getBankName(bankCode),
+            availableCards: getCardsForBank(bankCode),
+            mostLikelyCard: uniqueMatches[0]?.card || null,
+            confidence: uniqueMatches[0]?.confidence || 0,
+            detectedCards: uniqueMatches.length > 0 ? uniqueMatches.map(m => m.card) : undefined,
+            allowMultiple: true // Always allow multiple when we detect multiple cards/numbers
+          });
+          needsInput[bankCode] = true;
         }
       }
       
@@ -601,6 +683,18 @@ export default function OptimizerResults({ statements, selectedMonth }: Props) {
                 method: 'manual'
               }
             ]
+          }));
+        }}
+        onCardsSelected={(bankCode, cards) => {
+          console.log(`✅ User selected ${cards.length} cards for ${bankCode}:`, cards.map(c => c.name));
+          // Store multiple selections
+          setCardMatches(prev => ({
+            ...prev,
+            [bankCode]: cards.map(card => ({
+              card,
+              confidence: 100,
+              method: 'manual'
+            }))
           }));
         }}
         onManualEntry={(bankCode, cardName) => {
