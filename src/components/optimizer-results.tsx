@@ -621,11 +621,12 @@ export default function OptimizerResults({ statements, selectedMonth }: Props) {
           const warningsByBank: Record<string, OptimizationWarning[]> = {};
           
           for (const [bankCode, matchResults] of selectedCards) {
-            // matchResults is an ARRAY of CardMatchResult (multiple cards per bank)
-            if (!matchResults || matchResults.length === 0) continue;
+            // Ensure matchResults is always an array
+            const resultsArray = Array.isArray(matchResults) ? matchResults : [matchResults];
+            if (!resultsArray || resultsArray.length === 0) continue;
             
             // Process EACH card for this bank
-            for (const matchResult of matchResults) {
+            for (const matchResult of resultsArray) {
               const selectedCard = matchResult.card;
               const cardKey = `${bankCode}_${selectedCard.id}`;
               
@@ -646,7 +647,8 @@ export default function OptimizerResults({ statements, selectedMonth }: Props) {
                 });
                 
                 if (!userCardResponse.ok) {
-                  console.error(`Failed to get analysis for ${bankCode} card ${selectedCard.name}`);
+                  console.error(`Failed to get analysis for ${bankCode} card ${selectedCard.name}: ${userCardResponse.status}`);
+                  // Skip this card but continue with others
                   continue;
                 }
                 
@@ -669,6 +671,8 @@ export default function OptimizerResults({ statements, selectedMonth }: Props) {
                 }
               } catch (err) {
                 console.error(`Error analyzing ${bankCode} card ${selectedCard.name}:`, err);
+                // Continue with other cards even if this one fails
+                continue;
               }
             }
           }
