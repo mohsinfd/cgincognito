@@ -96,6 +96,19 @@ export default function CardSelectionModal({
     }
   };
 
+  const handleCardsSelected = (cards: any[]) => {
+    if (onCardsSelected) {
+      onCardsSelected(currentBank.bankCode, cards);
+    }
+    
+    // Advance to next bank or close modal after confirming multi-select
+    if (!isLastBank && bankQueue.length > 0) {
+      setCurrentIndex(prev => prev + 1);
+    } else {
+      onClose();
+    }
+  };
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
       <div className="relative">
@@ -131,7 +144,7 @@ export default function CardSelectionModal({
           detectedCards={currentBank.detectedCards}
           allowMultiple={currentBank.allowMultiple}
           onCardSelected={handleCardSelected}
-          onCardsSelected={onCardsSelected ? (cards) => onCardsSelected(currentBank.bankCode, cards) : undefined}
+          onCardsSelected={currentBank.allowMultiple ? handleCardsSelected : undefined}
           onManualEntry={handleManualEntry}
         />
         
